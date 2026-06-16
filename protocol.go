@@ -1,6 +1,8 @@
 package quartz
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 )
@@ -14,8 +16,6 @@ type Cmd byte
 
 const (
 	DotE Cmd = 'E'
-	DotR Cmd = 'R'
-	DotA Cmd = 'A'
 )
 
 type QuartzProtocol struct {
@@ -25,8 +25,9 @@ type QuartzProtocol struct {
 	delimiter string
 	maxLength int
 
-	readErrors chan error
-	lines      chan []byte
+	readErrors   chan error
+	lines        chan []byte
+	messageQueue []byte
 }
 
 type PcolOpts struct {
@@ -55,13 +56,15 @@ func NewProtocol(
 		log:       log,
 		delimiter: delimiter,
 		maxLength: maxLength,
+
+		lines:        make(chan []byte, 1),
+		messageQueue: make([]byte, 0),
 	}
 }
 
 func (p *QuartzProtocol) Start() {
 	go p.dispatch()
 	go p.readLines()
-	go p.commandQueue()
 }
 
 func (p *QuartzProtocol) dispatch() {
@@ -83,12 +86,55 @@ func (p *QuartzProtocol) dispatch() {
 	}
 }
 
-// readLines reads and parses the incoming data and passes either a valid line
-// or an error to [dispatch]
-func (p *QuartzProtocol) readLines() {}
+// readLines reads the incoming data from the reader
+//
+// When readLines encounters an error, its sent to the [readErrors] channel.
+// Otherwise, the byte array is passed to the [lines] channel for parsing
+//
+// EOF is not considered an error as this is meant to read a contiguous stream
+// of data.
+func (p *QuartzProtocol) readLines() {
+	buf := make([]byte, 8)
 
-func (p *QuartzProtocol) commandQueue() {}
+	// TODO: Maybe only pass a complete line from readLines? Which would require
+	// building the buffer here
+	//
+	// TODO: Should we do something else with an EOF?
+	for {
+		_, err := p.transport.Read(buf)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				p.readErrors <- err
+			}
+			continue
+		}
+		p.lines <- buf
+	}
+}
 
-func (p *QuartzProtocol) handleLine(line []byte) {}
+// handleLine parses read lines from the [lines] channel. If a line does not
+// include a delimiter, then the buffer is built until one is encountered.
+// Once a complete line is found, handleLine checks if the line is either
+// an error, ".E", a NULL (only a delimiter), or otherwise a valid command.
+// handleLine will then pass the line onto [handleError], [handleNullCmd] or
+// [handleCmd] respectively.
+//
+// A buffer exceeding p.maxLength will be dropped, and an error returned to the
+// client
+func (p *QuartzProtocol) handleLine(line []byte) {
+	delimIdx := bytes.Index(line, []byte(p.delimiter))
+	if delimIdx == -1 {
+		p.messageQueue = append(p.messageQueue, line...)
+		return
+	}
 
-func (p *QuartzProtocol) handleError(err error) {}
+	line = line[:delimIdx]
+
+	if len(line) == 0 {
+		p.handleNullCmd(line)
+	}
+
+}
+
+func (p *QuartzProtocol) handleError(err error)     {}
+func (p *QuartzProtocol) handleNullCmd(line []byte) {}
