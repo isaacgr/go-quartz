@@ -8,26 +8,32 @@ import (
 )
 
 const (
-	defaultDelimiter = "\r"
-	defaultMaxLength = 1024 * 1024
+	defaultDelimiter     = "\r"
+	defaultMaxLength     = 1024 * 1024
+	defaultMaxBufferSize = 8
 )
 
 type Cmd byte
 
 const (
-	DotE Cmd = 'E'
+	DotS Cmd = 'S'
 )
 
+type CommandHandler func(p *QuartzProtocol, d Decoder[any])
+
 type QuartzProtocol struct {
-	transport io.ReadWriteCloser // Generally [net.Conn], but the protocol could parse things like files too
+	transport io.ReadWriteCloser // Generally [net.Conn], but the protocol could parse things like files too so I thought this might be interesting
 	log       *slog.Logger
 
 	delimiter string
 	maxLength int
 
-	readErrors   chan error
-	lines        chan []byte
-	messageQueue []byte
+	readErrors chan error
+	lines      chan []byte
+	writes     chan []byte
+
+	closeSig        chan struct{}
+	commandHandlers map[string]CommandHandler
 }
 
 type PcolOpts struct {
@@ -57,14 +63,34 @@ func NewProtocol(
 		delimiter: delimiter,
 		maxLength: maxLength,
 
-		lines:        make(chan []byte, 1),
-		messageQueue: make([]byte, 0),
+		lines:  make(chan []byte, 1),
+		writes: make(chan []byte, 1),
+
+		commandHandlers: make(map[string]CommandHandler),
+
+		closeSig: make(chan struct{}),
 	}
 }
 
 func (p *QuartzProtocol) Start() {
 	go p.dispatch()
 	go p.readLines()
+}
+
+func (p *QuartzProtocol) Stop() {
+	close(p.closeSig)
+}
+
+func (p *QuartzProtocol) WaitUntilClosed() {
+	<-p.closeSig
+}
+
+func (p *QuartzProtocol) AddCommandHandler(cmd string, handler CommandHandler) {
+	if _, ok := p.commandHandlers[cmd]; !ok {
+		p.log.Error("Handler already registerd for command", "Cmd", cmd)
+	} else {
+		p.commandHandlers[cmd] = handler
+	}
 }
 
 func (p *QuartzProtocol) dispatch() {
@@ -81,60 +107,149 @@ func (p *QuartzProtocol) dispatch() {
 				// TODO: close some channel that will close the protocol
 				return
 			}
-			p.handleError(err)
+			p.handleShutdown(err.Error())
 		}
 	}
 }
 
-// readLines reads the incoming data from the reader
+// readLines parses the incoming data from the reader for a delimiter and
+// passes a complete line onto a channel for consumption
 //
 // When readLines encounters an error, its sent to the [readErrors] channel.
-// Otherwise, the byte array is passed to the [lines] channel for parsing
+// Otherwise, the byte array is passed to the [lines] channel for command handling.
 //
 // EOF is not considered an error as this is meant to read a contiguous stream
 // of data.
-func (p *QuartzProtocol) readLines() {
-	buf := make([]byte, 8)
-
-	// TODO: Maybe only pass a complete line from readLines? Which would require
-	// building the buffer here
-	//
-	// TODO: Should we do something else with an EOF?
-	for {
-		_, err := p.transport.Read(buf)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				p.readErrors <- err
-			}
-			continue
-		}
-		p.lines <- buf
-	}
-}
-
-// handleLine parses read lines from the [lines] channel. If a line does not
-// include a delimiter, then the buffer is built until one is encountered.
-// Once a complete line is found, handleLine checks if the line is either
-// an error, ".E", a NULL (only a delimiter), or otherwise a valid command.
-// handleLine will then pass the line onto [handleError], [handleNullCmd] or
-// [handleCmd] respectively.
 //
 // A buffer exceeding p.maxLength will be dropped, and an error returned to the
 // client
+func (p *QuartzProtocol) readLines() {
+	buf := make([]byte, defaultMaxBufferSize)
+	readPos := 0
+	lineBuffer := make([]byte, defaultMaxBufferSize)
+
+	// TODO: Should we do something else with an EOF? Maybe read errors just shutdown the pcol
+	for {
+		readBytes, err := p.transport.Read(buf)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				p.log.Error("Error reading data", "Error", err)
+				p.readErrors <- err
+			} else {
+				p.log.Warn("Transport ended by peer")
+
+			}
+			continue
+		}
+
+		// we have data
+		if readBytes > 0 {
+			// TODO: This is kind of dirty
+			// TODO: Need to make sure we dont exceed the max length
+			// TODO: Need to make sure we dont exceed the max buffer size
+			if len(lineBuffer) == cap(lineBuffer) {
+				// grow the line buffer
+				newBuf := make([]byte, readPos+len(lineBuffer))
+				copy(newBuf, lineBuffer)
+				lineBuffer = newBuf
+			}
+			copy(lineBuffer[readPos:], buf[:readBytes])
+			// our new reader position should increment how much data we sucessfully read
+			readPos += readBytes
+
+			// send all complete lines
+			linePos := 0
+			for {
+				delimIdx := bytes.Index(
+					lineBuffer[linePos:readPos],
+					[]byte(p.delimiter),
+				)
+				// no complete lines
+				if delimIdx < 0 {
+					break
+				}
+
+				linePos += delimIdx
+				line := lineBuffer[:linePos]
+				linePos += 1
+
+				p.lines <- line
+			}
+		}
+	}
+}
+
+// handleLine parses a complete line and passes the command onto the respective
+// handler
 func (p *QuartzProtocol) handleLine(line []byte) {
-	delimIdx := bytes.Index(line, []byte(p.delimiter))
-	if delimIdx == -1 {
-		p.messageQueue = append(p.messageQueue, line...)
+	if line[0] != '.' || !(len(line) > 1) {
+		p.handleUnknownCmd(line)
 		return
 	}
 
-	line = line[:delimIdx]
-
 	if len(line) == 0 {
 		p.handleNullCmd(line)
+		return
 	}
 
+	p.handleCommand(line)
 }
 
-func (p *QuartzProtocol) handleError(err error)     {}
-func (p *QuartzProtocol) handleNullCmd(line []byte) {}
+func (p *QuartzProtocol) handleCommand(line []byte) {
+	cmd := line[1]
+	// Undertale mode
+	switch cmd {
+	case 'S':
+		d := DecodeDotS(line)
+	case 'M':
+	case 'B':
+		peek := line[2]
+		switch peek {
+		case 'L':
+		case 'U':
+		case 'I':
+		case 'A':
+			// Response for .B request
+		default:
+			p.handleUnknownCmd(line)
+		}
+	case 'I':
+	case 'L':
+	case 'R':
+		peek := line[2]
+		switch peek {
+		case 'D', 'E':
+		case 'S', 'T':
+		case 'L', 'M':
+		default:
+			p.handleUnknownCmd(line)
+		}
+	case 'W':
+	case 'Q':
+		peek := line[2]
+		switch peek {
+		case 'C':
+		case 'S':
+		case 'L':
+		case 'R':
+		default:
+			p.handleUnknownCmd(line)
+		}
+	case 'A', 'U':
+	case '#':
+	case '&':
+	default:
+		p.handleUnknownCmd(line)
+	}
+}
+
+func (p *QuartzProtocol) handleNullCmd(line []byte)    {}
+func (p *QuartzProtocol) handleUnknownCmd(line []byte) {}
+
+// handleShutdown closes the transport and stops the protocol
+func (p *QuartzProtocol) handleShutdown(reason string) {
+	p.log.Error("Shutting down", "Reason", reason)
+	p.transport.Close()
+	// TODO: this should trigger a handler for the transport conn closing
+	p.Stop()
+}
