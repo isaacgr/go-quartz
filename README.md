@@ -2,6 +2,14 @@
 
 A client and server library implementing the Evertz [Quartz protocol](./docs/evertz-an65-quartz-rcp-t01-1v4.pdf), written in GO
 
+## Disclaimer
+This project is not affiliated, associated, authorized, endorsed by, or in any 
+way officially connected with [Evertz Microsystems Ltd.], or any of its 
+subsidiaries or its affiliates. 
+The official [Evertz Microsystems Ltd.] website can be found at [https://evertz.com/]. 
+The name "[Evertz Microsystems Ltd.]" as well as related names, marks, emblems, 
+and images are registered trademarks of their respective owners.
+
 ## High-level library architecture
 
 ## References

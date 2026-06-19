@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 )
 
 const (
@@ -19,10 +20,10 @@ const (
 	DotS Cmd = 'S'
 )
 
-type CommandHandler func(p *QuartzProtocol, d Decoder[any])
+type CommandHandler func(p *QuartzProtocol, cmd any)
 
 type QuartzProtocol struct {
-	transport io.ReadWriteCloser // Generally [net.Conn], but the protocol could parse things like files too so I thought this might be interesting
+	transport net.Conn
 	log       *slog.Logger
 
 	delimiter string
@@ -33,7 +34,10 @@ type QuartzProtocol struct {
 	writes     chan []byte
 
 	closeSig        chan struct{}
-	commandHandlers map[string]CommandHandler
+	commandHandlers map[Cmd]CommandHandler
+
+	commandQueue chan string
+	current      string // The current command awaiting processing
 }
 
 type PcolOpts struct {
@@ -42,7 +46,7 @@ type PcolOpts struct {
 }
 
 func NewProtocol(
-	transport io.ReadWriteCloser,
+	transport net.Conn,
 	log *slog.Logger,
 	opts *PcolOpts,
 ) *QuartzProtocol {
@@ -66,9 +70,11 @@ func NewProtocol(
 		lines:  make(chan []byte, 1),
 		writes: make(chan []byte, 1),
 
-		commandHandlers: make(map[string]CommandHandler),
+		commandHandlers: make(map[Cmd]CommandHandler),
 
 		closeSig: make(chan struct{}),
+
+		commandQueue: make(chan string, 1000),
 	}
 }
 
@@ -85,7 +91,7 @@ func (p *QuartzProtocol) WaitUntilClosed() {
 	<-p.closeSig
 }
 
-func (p *QuartzProtocol) AddCommandHandler(cmd string, handler CommandHandler) {
+func (p *QuartzProtocol) AddCommandHandler(cmd Cmd, handler CommandHandler) {
 	if _, ok := p.commandHandlers[cmd]; !ok {
 		p.log.Error("Handler already registerd for command", "Cmd", cmd)
 	} else {
@@ -179,8 +185,8 @@ func (p *QuartzProtocol) readLines() {
 	}
 }
 
-// handleLine parses a complete line and passes the command onto the respective
-// handler
+// handleLine parses a complete line and passes the command, response or
+// update onto the respective handler
 func (p *QuartzProtocol) handleLine(line []byte) {
 	if line[0] != '.' || !(len(line) > 1) {
 		p.handleUnknownCmd(line)
@@ -192,56 +198,93 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		return
 	}
 
-	p.handleCommand(line)
-}
-
-func (p *QuartzProtocol) handleCommand(line []byte) {
-	cmd := line[1]
+	msg := line[1]
+	peek := line[2] // need to know the next char to determine full cmd
 	// Undertale mode
-	switch cmd {
+	switch msg {
 	case 'S':
-		d := DecodeDotS(line)
+		handler, ok := p.commandHandlers[DotS]
+		if !ok {
+			p.log.Error("No matching handler found for command", "Cmd", DotS)
+			return
+		}
+		cmd, err := DecodeDotS[DotSCmd](line[2:])
+		if err != nil {
+			p.log.Error(
+				".S command received, but invalid arguments",
+				"Cmd",
+				string(line),
+			)
+			return
+		}
+		handler(p, cmd)
 	case 'M':
 	case 'B':
-		peek := line[2]
 		switch peek {
 		case 'L':
 		case 'U':
 		case 'I':
 		case 'A':
 			// Response for .B request
+			p.handleResponse(line)
 		default:
 			p.handleUnknownCmd(line)
 		}
+	case 'F':
 	case 'I':
+	case 'C':
 	case 'L':
 	case 'R':
-		peek := line[2]
+		switch peek {
+		case 'D', 'E':
+		case 'S', 'T':
+		case 'L', 'M':
+		case 'A':
+			// Response for .R request, or a .W request
+			p.handleResponse(line)
+		default:
+			p.handleUnknownCmd(line)
+		}
+	case 'W':
 		switch peek {
 		case 'D', 'E':
 		case 'S', 'T':
 		case 'L', 'M':
 		default:
 			p.handleUnknownCmd(line)
+
 		}
-	case 'W':
+	case '?':
+		// Embedded control system only
+	case '!':
+		// Embedded control system only
 	case 'Q':
-		peek := line[2]
 		switch peek {
 		case 'C':
-		case 'S':
-		case 'L':
 		case 'R':
+		case 'S':
+		case 'F':
+		case 'D':
+		case 'L':
 		default:
 			p.handleUnknownCmd(line)
 		}
-	case 'A', 'U':
+	case 'A', 'E':
+		// General responses
+		// .A if all good, .E if error
+		p.handleResponse(line)
+	case 'U':
+		// Can be a response to a .S command, or unsolicited
+		p.handleUpdate(line)
 	case '#':
 	case '&':
 	default:
 		p.handleUnknownCmd(line)
 	}
 }
+
+func (p *QuartzProtocol) handleUpdate(line []byte)   {}
+func (p *QuartzProtocol) handleResponse(line []byte) {}
 
 func (p *QuartzProtocol) handleNullCmd(line []byte)    {}
 func (p *QuartzProtocol) handleUnknownCmd(line []byte) {}
