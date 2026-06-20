@@ -2,7 +2,9 @@ package quartz
 
 import (
 	"bytes"
+	"container/list"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -17,6 +19,8 @@ const (
 type Cmd byte
 
 const (
+	DotE Cmd = 'E'
+	DotA Cmd = 'A'
 	DotS Cmd = 'S'
 )
 
@@ -36,13 +40,25 @@ type QuartzProtocol struct {
 	closeSig        chan struct{}
 	commandHandlers map[Cmd]CommandHandler
 
-	commandQueue chan string
+	commandQueue list.List
 	current      string // The current command awaiting processing
 }
 
 type PcolOpts struct {
 	delimiter *string
 	maxLength *int
+}
+
+type ErrResp struct {
+	// TODO: We can maybe add a message to an error? Its unclear
+	Msg string
+}
+
+func (e *ErrResp) Error() string {
+	return fmt.Sprintf(
+		".E%s",
+		defaultDelimiter,
+	)
 }
 
 func NewProtocol(
@@ -74,13 +90,14 @@ func NewProtocol(
 
 		closeSig: make(chan struct{}),
 
-		commandQueue: make(chan string, 1000),
+		commandQueue: *list.New(),
 	}
 }
 
 func (p *QuartzProtocol) Start() {
 	go p.dispatch()
 	go p.readLines()
+	go p.writeLines()
 }
 
 func (p *QuartzProtocol) Stop() {
@@ -92,8 +109,8 @@ func (p *QuartzProtocol) WaitUntilClosed() {
 }
 
 func (p *QuartzProtocol) AddCommandHandler(cmd Cmd, handler CommandHandler) {
-	if _, ok := p.commandHandlers[cmd]; !ok {
-		p.log.Error("Handler already registerd for command", "Cmd", cmd)
+	if _, ok := p.commandHandlers[cmd]; ok {
+		p.log.Error("Handler already registered for command", "Cmd", cmd)
 	} else {
 		p.commandHandlers[cmd] = handler
 	}
@@ -118,6 +135,27 @@ func (p *QuartzProtocol) dispatch() {
 	}
 }
 
+func (p *QuartzProtocol) writeLines() {
+	for {
+		select {
+		case line, ok := <-p.writes:
+			if !ok {
+				// TODO: close some channel that will close the protocol
+				return
+			}
+			_, err := p.transport.Write(line)
+			if err != nil {
+				p.log.Error(
+					"Unable to write to peer",
+					"Error",
+					err,
+				)
+				// TODO: What should happen? Close the connection?
+			}
+		}
+	}
+}
+
 // readLines parses the incoming data from the reader for a delimiter and
 // passes a complete line onto a channel for consumption
 //
@@ -132,6 +170,8 @@ func (p *QuartzProtocol) dispatch() {
 func (p *QuartzProtocol) readLines() {
 	buf := make([]byte, defaultMaxBufferSize)
 	readPos := 0
+	// TODO: I think im not doing the line reading very effectively
+	linePos := 0
 	lineBuffer := make([]byte, defaultMaxBufferSize)
 
 	// TODO: Should we do something else with an EOF? Maybe read errors just shutdown the pcol
@@ -164,7 +204,6 @@ func (p *QuartzProtocol) readLines() {
 			readPos += readBytes
 
 			// send all complete lines
-			linePos := 0
 			for {
 				delimIdx := bytes.Index(
 					lineBuffer[linePos:readPos],
@@ -185,8 +224,7 @@ func (p *QuartzProtocol) readLines() {
 	}
 }
 
-// handleLine parses a complete line and passes the command, response or
-// update onto the respective handler
+// handleLine parses a full line and queues the command
 func (p *QuartzProtocol) handleLine(line []byte) {
 	if line[0] != '.' || !(len(line) > 1) {
 		p.handleUnknownCmd(line)
@@ -199,7 +237,6 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	}
 
 	msg := line[1]
-	peek := line[2] // need to know the next char to determine full cmd
 	// Undertale mode
 	switch msg {
 	case 'S':
@@ -208,7 +245,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.log.Error("No matching handler found for command", "Cmd", DotS)
 			return
 		}
-		cmd, err := DecodeDotS[DotSCmd](line[2:])
+		cmd, err := DecodeDotS(line[2:])
 		if err != nil {
 			p.log.Error(
 				".S command received, but invalid arguments",
@@ -220,7 +257,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		handler(p, cmd)
 	case 'M':
 	case 'B':
-		switch peek {
+		switch p.peekChar(line) {
 		case 'L':
 		case 'U':
 		case 'I':
@@ -235,7 +272,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case 'C':
 	case 'L':
 	case 'R':
-		switch peek {
+		switch p.peekChar(line) {
 		case 'D', 'E':
 		case 'S', 'T':
 		case 'L', 'M':
@@ -246,7 +283,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleUnknownCmd(line)
 		}
 	case 'W':
-		switch peek {
+		switch p.peekChar(line) {
 		case 'D', 'E':
 		case 'S', 'T':
 		case 'L', 'M':
@@ -259,7 +296,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case '!':
 		// Embedded control system only
 	case 'Q':
-		switch peek {
+		switch p.peekChar(line) {
 		case 'C':
 		case 'R':
 		case 'S':
@@ -269,10 +306,10 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		default:
 			p.handleUnknownCmd(line)
 		}
-	case 'A', 'E':
-		// General responses
-		// .A if all good, .E if error
+	case 'A':
 		p.handleResponse(line)
+	case 'E':
+		p.handleErrorResponse(line)
 	case 'U':
 		// Can be a response to a .S command, or unsolicited
 		p.handleUpdate(line)
@@ -283,11 +320,58 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	}
 }
 
+func (p *QuartzProtocol) peekChar(line []byte) byte {
+	if len(line) > 2 {
+		return line[2]
+	}
+	return 0
+}
+
+// sendLine is the low level function to send a single line to a remote peer
+// the line is queued in the transports write queue
+func (p *QuartzProtocol) sendLine(line []byte) error {
+	select {
+	case p.writes <- line:
+		return nil
+	case <-p.closeSig:
+		return errors.New("protocol closed: write cancelled")
+	default:
+		return errors.New("protocol shut down: write failed")
+	}
+}
+
 func (p *QuartzProtocol) handleUpdate(line []byte)   {}
 func (p *QuartzProtocol) handleResponse(line []byte) {}
 
-func (p *QuartzProtocol) handleNullCmd(line []byte)    {}
-func (p *QuartzProtocol) handleUnknownCmd(line []byte) {}
+func (p *QuartzProtocol) handleErrorResponse(line []byte) {
+	handler, ok := p.commandHandlers[DotE]
+	if !ok {
+		p.log.Error("No matching handler found for command", "Cmd", DotE)
+		return
+	}
+	cmd, err := DecodeDotE(line[1:])
+	if err != nil {
+		p.log.Error(
+			".E received, but invalid structure",
+			"Line",
+			string(line),
+		)
+		return
+	}
+	handler(p, cmd)
+
+}
+
+func (p *QuartzProtocol) handleNullCmd(line []byte) {}
+func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
+	p.log.Warn(
+		"Received unknown command",
+		"Line",
+		string(line),
+	)
+	err := &ErrResp{}
+	p.sendLine([]byte(err.Error()))
+}
 
 // handleShutdown closes the transport and stops the protocol
 func (p *QuartzProtocol) handleShutdown(reason string) {
