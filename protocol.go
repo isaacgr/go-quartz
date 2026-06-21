@@ -83,8 +83,9 @@ func NewProtocol(
 		delimiter: delimiter,
 		maxLength: maxLength,
 
-		lines:  make(chan []byte, 1),
-		writes: make(chan []byte, 1),
+		lines:      make(chan []byte, 1),
+		writes:     make(chan []byte, 1),
+		readErrors: make(chan error, 1),
 
 		commandHandlers: make(map[Cmd]CommandHandler),
 
@@ -131,27 +132,22 @@ func (p *QuartzProtocol) dispatch() {
 				return
 			}
 			p.handleShutdown(err.Error())
+		case <-p.closeSig:
+			return
 		}
 	}
 }
 
 func (p *QuartzProtocol) writeLines() {
-	for {
-		select {
-		case line, ok := <-p.writes:
-			if !ok {
-				// TODO: close some channel that will close the protocol
-				return
-			}
-			_, err := p.transport.Write(line)
-			if err != nil {
-				p.log.Error(
-					"Unable to write to peer",
-					"Error",
-					err,
-				)
-				// TODO: What should happen? Close the connection?
-			}
+	for line := range p.writes {
+		_, err := p.transport.Write(line)
+		if err != nil {
+			p.log.Error(
+				"Unable to write to peer",
+				"Error",
+				err,
+			)
+			// TODO: What should happen? Close the connection?
 		}
 	}
 }
@@ -168,11 +164,10 @@ func (p *QuartzProtocol) writeLines() {
 // A buffer exceeding p.maxLength will be dropped, and an error returned to the
 // client
 func (p *QuartzProtocol) readLines() {
-	buf := make([]byte, defaultMaxBufferSize)
-	readPos := 0
-	// TODO: I think im not doing the line reading very effectively
-	linePos := 0
-	lineBuffer := make([]byte, defaultMaxBufferSize)
+	buf := make([]byte, defaultMaxBufferSize)        // buffer for incomming data
+	lineBuffer := make([]byte, defaultMaxBufferSize) // buffer to pop off lines
+
+	readPos := 0 // how much valid data has been read
 
 	// TODO: Should we do something else with an EOF? Maybe read errors just shutdown the pcol
 	for {
@@ -190,20 +185,21 @@ func (p *QuartzProtocol) readLines() {
 
 		// we have data
 		if readBytes > 0 {
-			// TODO: This is kind of dirty
 			// TODO: Need to make sure we dont exceed the max length
 			// TODO: Need to make sure we dont exceed the max buffer size
+
 			if len(lineBuffer) == cap(lineBuffer) {
 				// grow the line buffer
-				newBuf := make([]byte, readPos+len(lineBuffer))
+				newBuf := make([]byte, len(lineBuffer)+readPos)
 				copy(newBuf, lineBuffer)
 				lineBuffer = newBuf
 			}
+
 			copy(lineBuffer[readPos:], buf[:readBytes])
 			// our new reader position should increment how much data we sucessfully read
 			readPos += readBytes
 
-			// send all complete lines
+			linePos := 0 // position of the current line search
 			for {
 				delimIdx := bytes.Index(
 					lineBuffer[linePos:readPos],
@@ -216,9 +212,17 @@ func (p *QuartzProtocol) readLines() {
 
 				linePos += delimIdx
 				line := lineBuffer[:linePos]
-				linePos += 1
+				linePos += len(p.delimiter)
 
 				p.lines <- line
+			}
+			// shift remaining partial line to beginning of buffer
+			if linePos > 0 {
+				remainingBytes := readPos - linePos
+				if remainingBytes > 0 {
+					copy(lineBuffer, lineBuffer[linePos:readPos])
+				}
+				readPos = remainingBytes
 			}
 		}
 	}
@@ -358,8 +362,8 @@ func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 		)
 		return
 	}
+	// TODO: This blcoks the go routine
 	handler(p, cmd)
-
 }
 
 func (p *QuartzProtocol) handleNullCmd(line []byte) {}
@@ -376,7 +380,6 @@ func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
 // handleShutdown closes the transport and stops the protocol
 func (p *QuartzProtocol) handleShutdown(reason string) {
 	p.log.Error("Shutting down", "Reason", reason)
-	p.transport.Close()
 	// TODO: this should trigger a handler for the transport conn closing
 	p.Stop()
 }
