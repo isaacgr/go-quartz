@@ -177,8 +177,7 @@ func (p *QuartzProtocol) readLines() {
 				p.log.Error("Error reading data", "Error", err)
 				p.readErrors <- err
 			} else {
-				p.log.Warn("Transport ended by peer")
-
+				p.log.Warn("Connection closed by peer")
 			}
 			continue
 		}
@@ -190,9 +189,11 @@ func (p *QuartzProtocol) readLines() {
 
 			if len(lineBuffer) == cap(lineBuffer) {
 				// grow the line buffer
-				newBuf := make([]byte, len(lineBuffer)+readPos)
-				copy(newBuf, lineBuffer)
-				lineBuffer = newBuf
+				// https://go.dev/wiki/SliceTricks#extend-capacity
+				lineBuffer = append(
+					make([]byte, 0, len(lineBuffer)+readBytes),
+					lineBuffer...,
+				)
 			}
 
 			copy(lineBuffer[readPos:], buf[:readBytes])
@@ -211,10 +212,11 @@ func (p *QuartzProtocol) readLines() {
 				}
 
 				linePos += delimIdx
-				line := lineBuffer[:linePos]
+				currLine := make([]byte, 0, len(lineBuffer))
+				currLine = append(currLine, lineBuffer[:linePos]...)
 				linePos += len(p.delimiter)
 
-				p.lines <- line
+				p.lines <- currLine
 			}
 			// shift remaining partial line to beginning of buffer
 			if linePos > 0 {
@@ -261,7 +263,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		handler(p, cmd)
 	case 'M':
 	case 'B':
-		switch p.peekChar(line) {
+		switch p.cmdType(line) {
 		case 'L':
 		case 'U':
 		case 'I':
@@ -276,7 +278,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case 'C':
 	case 'L':
 	case 'R':
-		switch p.peekChar(line) {
+		switch p.cmdType(line) {
 		case 'D', 'E':
 		case 'S', 'T':
 		case 'L', 'M':
@@ -287,7 +289,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleUnknownCmd(line)
 		}
 	case 'W':
-		switch p.peekChar(line) {
+		switch p.cmdType(line) {
 		case 'D', 'E':
 		case 'S', 'T':
 		case 'L', 'M':
@@ -300,7 +302,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case '!':
 		// Embedded control system only
 	case 'Q':
-		switch p.peekChar(line) {
+		switch p.cmdType(line) {
 		case 'C':
 		case 'R':
 		case 'S':
@@ -324,7 +326,9 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	}
 }
 
-func (p *QuartzProtocol) peekChar(line []byte) byte {
+// cmdType is a helper method to get the 'type' of the dot command, for
+// ex. the type of .BL would be 'L'
+func (p *QuartzProtocol) cmdType(line []byte) byte {
 	if len(line) > 2 {
 		return line[2]
 	}
@@ -362,7 +366,7 @@ func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 		)
 		return
 	}
-	// TODO: This blcoks the go routine
+	// TODO: This blocks the go routine
 	handler(p, cmd)
 }
 
@@ -373,8 +377,11 @@ func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
 		"Line",
 		string(line),
 	)
-	err := &ErrResp{}
-	p.sendLine([]byte(err.Error()))
+	dotE := &ErrResp{}
+	err := p.sendLine([]byte(dotE.Error()))
+	if err != nil {
+		p.log.Error("Unable to send .E response", "Error", err)
+	}
 }
 
 // handleShutdown closes the transport and stops the protocol
