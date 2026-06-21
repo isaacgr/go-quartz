@@ -1,4 +1,4 @@
-package quartz
+package goquartz
 
 import (
 	"net"

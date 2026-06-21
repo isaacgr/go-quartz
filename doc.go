@@ -1,4 +1,4 @@
-// package quartz implements the Evertz Quartz Router Control Protocol (RCP)
+// package goquartz implements the Evertz Quartz Router Control Protocol (RCP)
 // for controlling routing crosspoints.
 //
 // Quartz is a serialized protocol, so each command must be responded to before
@@ -27,4 +27,4 @@
 //	p := quartz.NewProtocol(conn, slog.Default(), nil)
 //	p.Start()
 //	defer p.Stop()
-package quartz
+package goquartz
