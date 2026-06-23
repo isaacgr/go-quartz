@@ -6,7 +6,7 @@ import (
 )
 
 var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
-var dotSRegexp *regexp.Regexp = regexp.MustCompile("^[A-Z]{1,16}[0-9]{0,},[0-9]{0,}$")
+var dotSRegexp *regexp.Regexp = regexp.MustCompile("^[A-Z]{1,16}[0-9]{1,},[0-9]{1,}$")
 
 type DecodeError struct {
 	Cmd  string

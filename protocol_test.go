@@ -2,6 +2,7 @@ package goquartz
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,22 +11,53 @@ import (
 
 var logger = loggir.GetLogger("test", false)
 
-func TestSingleLineInvalid(t *testing.T) {
+func TestReadLinesPartialMessage(t *testing.T) {
+	server, client := net.Pipe()
+	p := NewProtocol(server, logger, nil)
+	p.Start()
+	defer p.Stop()
+
+	p.AddCommandHandler(DotS, func(p *QuartzProtocol, cmd any) {
+		r, ok := cmd.(*DotSCmd)
+		if !ok {
+			t.Errorf(
+				"Incorrect response received. got=%v, expected=.E",
+				cmd,
+			)
+		}
+		if r.dst != "1" || r.src != "1" {
+			t.Errorf(
+				"incorrect route: got dst=%s src=%s, want dst=1, src=1",
+				r.dst,
+				r.src,
+			)
+		}
+	})
+
+	client.Write([]byte(".SV1"))
+	time.Sleep(time.Duration(1*time.Second))
+	client.Write([]byte(",1\r"))
+
+}
+
+func TestQuartzProtocolDotE(t *testing.T) {
 	server, client := net.Pipe()
 
 	sender := NewProtocol(client, logger, nil)
 	receiver := NewProtocol(server, logger, nil)
-
 	sender.Start()
 	receiver.Start()
 
-	go func() {
-		time.Sleep(time.Duration(1 * time.Second))
+	var wg sync.WaitGroup
+	var respMu sync.Mutex
+
+	t.Cleanup(func() {
 		sender.Stop()
 		receiver.Stop()
-	}()
+	})
 
 	var resp *DotEResp
+	wg.Add(1)
 	sender.AddCommandHandler(DotE, func(p *QuartzProtocol, cmd any) {
 		r, ok := cmd.(*DotEResp)
 		if !ok {
@@ -34,13 +66,15 @@ func TestSingleLineInvalid(t *testing.T) {
 				cmd,
 			)
 		}
+		respMu.Lock()
 		resp = r
+		respMu.Unlock()
+		wg.Done()
 	})
 
 	client.Write([]byte("foo\r"))
 
-	sender.WaitUntilClosed()
-	receiver.WaitUntilClosed()
+	wg.Wait()
 
 	if resp == nil {
 		t.Errorf(
@@ -49,7 +83,7 @@ func TestSingleLineInvalid(t *testing.T) {
 	}
 }
 
-func TestTwoLinesInvalid(t *testing.T) {
+func TestQuartzProtocolMultipleDotE(t *testing.T) {
 	server, client := net.Pipe()
 
 	sender := NewProtocol(client, logger, nil)
@@ -58,13 +92,17 @@ func TestTwoLinesInvalid(t *testing.T) {
 	sender.Start()
 	receiver.Start()
 
-	go func() {
-		time.Sleep(time.Duration(1 * time.Second))
+	var wg sync.WaitGroup
+	var respMu sync.Mutex
+
+	t.Cleanup(func() {
 		sender.Stop()
 		receiver.Stop()
-	}()
+	})
 
 	var resps []*DotEResp
+	wg.Add(2)
+
 	sender.AddCommandHandler(DotE, func(p *QuartzProtocol, cmd any) {
 		r, ok := cmd.(*DotEResp)
 		if !ok {
@@ -73,19 +111,75 @@ func TestTwoLinesInvalid(t *testing.T) {
 				cmd,
 			)
 		}
+
+		respMu.Lock()
 		resps = append(resps, r)
+		respMu.Unlock()
+		wg.Done()
 	})
 
 	client.Write([]byte("foo\rbarbaz\r"))
 
-	sender.WaitUntilClosed()
-	receiver.WaitUntilClosed()
-
+	wg.Wait()
 
 	if len(resps) != 2 {
 		t.Errorf(
 			"Not all responses received. got=%d, expected=2",
 			len(resps),
+		)
+	}
+}
+
+func TestQuartzProtocolDotS_V(t *testing.T) {
+	server, client := net.Pipe()
+
+	sender := NewProtocol(client, logger, nil)
+	receiver := NewProtocol(server, logger, nil)
+
+	sender.Start()
+	receiver.Start()
+
+	var wg sync.WaitGroup
+	var respMu sync.Mutex
+
+	t.Cleanup(func() {
+		sender.Stop()
+		receiver.Stop()
+	})
+
+	var resp *DotSCmd
+	wg.Add(1)
+
+	receiver.AddCommandHandler(DotS, func(p *QuartzProtocol, cmd any) {
+		r, ok := cmd.(*DotSCmd)
+		if !ok {
+			t.Errorf(
+				"Incorrect response received. got=%v, expected=.E",
+				cmd,
+			)
+		}
+
+		if r.dst != "1" || r.src != "1" {
+			t.Errorf(
+				"incorrect route: got dst=%s src=%s, want dst=1, src=1",
+				r.dst,
+				r.src,
+			)
+		}
+
+		respMu.Lock()
+		resp = r
+		respMu.Unlock()
+		wg.Done()
+	})
+
+	client.Write([]byte(".SV1,1\r"))
+
+	wg.Wait()
+
+	if resp == nil {
+		t.Errorf(
+			"No response received. expected=.E",
 		)
 	}
 }

@@ -25,6 +25,7 @@ const (
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
+type ConnectionHandler func(p *QuartzProtocol, conn net.Conn)
 
 type QuartzProtocol struct {
 	transport net.Conn
@@ -39,6 +40,8 @@ type QuartzProtocol struct {
 
 	closeSig        chan struct{}
 	commandHandlers map[Cmd]CommandHandler
+	connectionMadeHandler  ConnectionHandler
+	connectionLostHandler  ConnectionHandler
 
 	commandQueue list.List
 	current      string // The current command awaiting processing
@@ -107,6 +110,22 @@ func (p *QuartzProtocol) Stop() {
 
 func (p *QuartzProtocol) WaitUntilClosed() {
 	<-p.closeSig
+}
+
+func (p *QuartzProtocol) AddConnectionMadeHandler(handler ConnectionHandler){
+	if p.connectionMadeHandler != nil {
+		p.log.Error("Connection made handler already registered")
+	} else {
+		p.connectionMadeHandler = handler
+	}
+}
+
+func (p *QuartzProtocol) AddConnectionLostHandler(handler ConnectionHandler){
+	if p.connectionMadeHandler != nil {
+		p.log.Error("Connection lost handler already registered")
+	} else {
+		p.connectionMadeHandler = handler
+	}
 }
 
 func (p *QuartzProtocol) AddCommandHandler(cmd Cmd, handler CommandHandler) {
@@ -232,7 +251,7 @@ func (p *QuartzProtocol) readLines() {
 
 // handleLine parses a full line and queues the command
 func (p *QuartzProtocol) handleLine(line []byte) {
-	if line[0] != '.' || !(len(line) > 1) {
+	if !(len(line) > 1) ||line[0] != '.' {
 		p.handleUnknownCmd(line)
 		return
 	}
@@ -327,7 +346,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 }
 
 // cmdType is a helper method to get the 'type' of the dot command, for
-// ex. the type of .BL would be 'L'
+// example the type of .BL would be 'L'
 func (p *QuartzProtocol) cmdType(line []byte) byte {
 	if len(line) > 2 {
 		return line[2]

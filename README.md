@@ -1,6 +1,6 @@
 # go-quartz
 
-A client and server library implementing the Evertz [Quartz protocol](./docs/evertz-an65-quartz-rcp-t01-1v4.pdf), written in GO
+A client and server library implementing the Evertz [Quartz protocol](./docs/evertz-an65-quartz-rcp-t01-1v4.pdf), written in GO.
 
 ## Disclaimer
 This project is not affiliated, associated, authorized, endorsed by, or in any 
@@ -25,11 +25,12 @@ and images are registered trademarks of their respective owners.
 I wrote this library so I could teach myself some more complex topics and 
 patterns in a language that has re-ignited in me an interest in software
 building. This project builds upon knowledge I feel has waned ever since I did
-my very first [Jaysonic](https://github.com/isaacgr/jaysonic) JSON-RPC library in 
-Javascript, which I wrote while still a total n00b.
+my very first [Jaysonic](https://github.com/isaacgr/jaysonic) JSON-RPC library in  Javascript, which I wrote while 
+still a total n00b.
 
 I hope that whoever comes across this package finds it useful, even if they 
 have no use for the protocol itself.
 
-As an aside, I want to add that no AI was used in the making of this library.
-Which is a point of pride that I have for it.
+As an aside, I want to add that no AI was used to write the code of this library,
+which is a point of pride that I have for it. I used it to assist with ideas/concepts and act as a
+soundboard, which is something [I've written about](https://irowell.io/blog/AI_won%27t_replace_your_mentor,_but_it_might_be_the_only_one_available).
