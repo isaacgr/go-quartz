@@ -3,10 +3,11 @@ package goquartz
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
-var dotSRegexp *regexp.Regexp = regexp.MustCompile("^[A-Z]{1,16}[0-9]{1,},[0-9]{1,}$")
+var dotSRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
 
 type DecodeError struct {
 	Cmd  string
@@ -44,5 +45,16 @@ func DecodeDotS(line []byte) (*DotSCmd, error) {
 	if !ok {
 		return nil, &DecodeError{".S", string(line)}
 	}
-	return &DotSCmd{}, nil
+	matches := dotSRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		levels := strings.Split(matches[1], "")
+		dst := matches[2]
+		src := matches[2]
+		return &DotSCmd{
+			levels: levels,
+			dst:    dst,
+			src:    src,
+		}, nil
+	}
+	return nil, &DecodeError{".S", "Invalid request"}
 }

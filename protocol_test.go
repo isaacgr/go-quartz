@@ -21,7 +21,7 @@ func TestReadLinesPartialMessage(t *testing.T) {
 		r, ok := cmd.(*DotSCmd)
 		if !ok {
 			t.Errorf(
-				"Incorrect response received. got=%v, expected=.E",
+				"Incorrect response received. got=%v, expected=.S",
 				cmd,
 			)
 		}
@@ -32,12 +32,18 @@ func TestReadLinesPartialMessage(t *testing.T) {
 				r.src,
 			)
 		}
+
+		if len(r.levels) != 1 && r.levels[0] != "V" {
+			t.Errorf(
+				"incrorrect levels received: got %v, want=V", r.levels,
+			)
+		}
+
 	})
 
 	client.Write([]byte(".SV1"))
-	time.Sleep(time.Duration(1*time.Second))
+	time.Sleep(time.Duration(1 * time.Second))
 	client.Write([]byte(",1\r"))
-
 }
 
 func TestQuartzProtocolDotE(t *testing.T) {
@@ -130,7 +136,7 @@ func TestQuartzProtocolMultipleDotE(t *testing.T) {
 	}
 }
 
-func TestQuartzProtocolDotS_V(t *testing.T) {
+func TestQuartzProtocolDotSValid(t *testing.T) {
 	server, client := net.Pipe()
 
 	sender := NewProtocol(client, logger, nil)
@@ -174,6 +180,55 @@ func TestQuartzProtocolDotS_V(t *testing.T) {
 	})
 
 	client.Write([]byte(".SV1,1\r"))
+
+	wg.Wait()
+
+	if resp == nil {
+		t.Errorf(
+			"No response received. expected=.E",
+		)
+	}
+}
+
+func TestQuartzProtocolDotSInvalid(t *testing.T) {
+	server, client := net.Pipe()
+
+	sender := NewProtocol(client, logger, nil)
+	receiver := NewProtocol(server, logger, nil)
+
+	sender.Start()
+	receiver.Start()
+
+	var wg sync.WaitGroup
+
+	t.Cleanup(func() {
+		sender.Stop()
+		receiver.Stop()
+	})
+
+	var respMu sync.Mutex
+	var resp *DotEResp
+	wg.Add(1)
+
+	sender.AddCommandHandler(DotE, func(p *QuartzProtocol, cmd any) {
+		r, ok := cmd.(*DotEResp)
+		if !ok {
+			t.Errorf(
+				"Incorrect response received. got=%v, expected=.E",
+				cmd,
+			)
+		}
+		respMu.Lock()
+		resp = r
+		respMu.Unlock()
+		wg.Done()
+	})
+
+	receiver.AddCommandHandler(DotS, func(p *QuartzProtocol, cmd any) {
+		t.Error(".S handler should not have been called for invalid input")
+	})
+
+	client.Write([]byte(".S1,1\r"))
 
 	wg.Wait()
 

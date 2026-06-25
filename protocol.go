@@ -38,10 +38,10 @@ type QuartzProtocol struct {
 	lines      chan []byte
 	writes     chan []byte
 
-	closeSig        chan struct{}
-	commandHandlers map[Cmd]CommandHandler
-	connectionMadeHandler  ConnectionHandler
-	connectionLostHandler  ConnectionHandler
+	closeSig              chan struct{}
+	commandHandlers       map[Cmd]CommandHandler
+	connectionMadeHandler ConnectionHandler
+	connectionLostHandler ConnectionHandler
 
 	commandQueue list.List
 	current      string // The current command awaiting processing
@@ -112,7 +112,7 @@ func (p *QuartzProtocol) WaitUntilClosed() {
 	<-p.closeSig
 }
 
-func (p *QuartzProtocol) AddConnectionMadeHandler(handler ConnectionHandler){
+func (p *QuartzProtocol) AddConnectionMadeHandler(handler ConnectionHandler) {
 	if p.connectionMadeHandler != nil {
 		p.log.Error("Connection made handler already registered")
 	} else {
@@ -120,7 +120,7 @@ func (p *QuartzProtocol) AddConnectionMadeHandler(handler ConnectionHandler){
 	}
 }
 
-func (p *QuartzProtocol) AddConnectionLostHandler(handler ConnectionHandler){
+func (p *QuartzProtocol) AddConnectionLostHandler(handler ConnectionHandler) {
 	if p.connectionMadeHandler != nil {
 		p.log.Error("Connection lost handler already registered")
 	} else {
@@ -251,7 +251,7 @@ func (p *QuartzProtocol) readLines() {
 
 // handleLine parses a full line and queues the command
 func (p *QuartzProtocol) handleLine(line []byte) {
-	if !(len(line) > 1) ||line[0] != '.' {
+	if !(len(line) > 1) || line[0] != '.' {
 		p.handleUnknownCmd(line)
 		return
 	}
@@ -267,7 +267,11 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case 'S':
 		handler, ok := p.commandHandlers[DotS]
 		if !ok {
-			p.log.Error("No matching handler found for command", "Cmd", DotS)
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotS),
+			)
 			return
 		}
 		cmd, err := DecodeDotS(line[2:])
@@ -276,7 +280,16 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 				".S command received, but invalid arguments",
 				"Cmd",
 				string(line),
+				"Error",
+				err.Error(),
 			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
 			return
 		}
 		handler(p, cmd)
@@ -373,7 +386,11 @@ func (p *QuartzProtocol) handleResponse(line []byte) {}
 func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 	handler, ok := p.commandHandlers[DotE]
 	if !ok {
-		p.log.Error("No matching handler found for command", "Cmd", DotE)
+		p.log.Error(
+			"No matching handler found for command",
+			"Cmd",
+			string(DotE),
+		)
 		return
 	}
 	cmd, err := DecodeDotE(line[1:])
