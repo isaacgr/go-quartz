@@ -1,7 +1,10 @@
 package goquartz
 
 import (
+	"bytes"
+	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +47,23 @@ func TestReadLinesPartialMessage(t *testing.T) {
 	client.Write([]byte(".SV1"))
 	time.Sleep(time.Duration(1 * time.Second))
 	client.Write([]byte(",1\r"))
+}
+
+func TestUnknownCmdLogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	server, client := net.Pipe()
+	p := NewProtocol(server, logger, nil)
+	p.Start()
+	defer p.Stop()
+
+	client.Write([]byte("foo\r"))
+	time.Sleep(time.Duration(1 * time.Second))
+
+	if !strings.Contains(buf.String(), "unknown command") {
+		t.Errorf("expected warning log, got: %s", buf.String())
+	}
 }
 
 func TestQuartzProtocolDotE(t *testing.T) {
@@ -136,7 +156,7 @@ func TestQuartzProtocolMultipleDotE(t *testing.T) {
 	}
 }
 
-func TestQuartzProtocolDotSValid(t *testing.T) {
+func TestQuartzProtocolDotSValidRoute(t *testing.T) {
 	server, client := net.Pipe()
 
 	sender := NewProtocol(client, logger, nil)
@@ -173,6 +193,12 @@ func TestQuartzProtocolDotSValid(t *testing.T) {
 			)
 		}
 
+		if len(r.levels) != 1 && r.levels[0] != "V" {
+			t.Errorf(
+				"incrorrect levels received: got %v, want=V", r.levels,
+			)
+		}
+
 		respMu.Lock()
 		resp = r
 		respMu.Unlock()
@@ -190,7 +216,7 @@ func TestQuartzProtocolDotSValid(t *testing.T) {
 	}
 }
 
-func TestQuartzProtocolDotSInvalid(t *testing.T) {
+func TestQuartzProtocolDotSInvalidArgs(t *testing.T) {
 	server, client := net.Pipe()
 
 	sender := NewProtocol(client, logger, nil)

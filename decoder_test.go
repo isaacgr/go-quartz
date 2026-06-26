@@ -9,7 +9,9 @@ func TestDecodeDotS(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid single digit", []byte("V1,1"), false},
+		{"valid multi-level", []byte("VABCDEFGHIJKLMNOP1,1"), false},
 		{"valid multi digit", []byte("VAB001,001"), false},
+		{"invalid multi-level", []byte("VABCDEFGHIJKLMNOPQ1,1"), true},
 		{"no digits", []byte("V,"), true},
 		{"missing comma", []byte("V11"), true},
 		{"starts with digit", []byte("1V,1"), true},

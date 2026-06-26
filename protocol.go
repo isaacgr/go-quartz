@@ -265,6 +265,8 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	// Undertale mode
 	switch msg {
 	case 'S':
+		// TODO: Maybe separate this out to some more generic handler for all cases
+		// Maybe command handler specifies the decoder?
 		handler, ok := p.commandHandlers[DotS]
 		if !ok {
 			p.log.Error(
