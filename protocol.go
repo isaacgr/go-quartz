@@ -2,7 +2,6 @@ package goquartz
 
 import (
 	"bytes"
-	"container/list"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +21,7 @@ const (
 	DotE Cmd = 'E'
 	DotA Cmd = 'A'
 	DotS Cmd = 'S'
+	DotM Cmd = 'M'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -42,9 +42,6 @@ type QuartzProtocol struct {
 	commandHandlers       map[Cmd]CommandHandler
 	connectionMadeHandler ConnectionHandler
 	connectionLostHandler ConnectionHandler
-
-	commandQueue list.List
-	current      string // The current command awaiting processing
 }
 
 type PcolOpts struct {
@@ -93,8 +90,6 @@ func NewProtocol(
 		commandHandlers: make(map[Cmd]CommandHandler),
 
 		closeSig: make(chan struct{}),
-
-		commandQueue: *list.New(),
 	}
 }
 
@@ -296,6 +291,41 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case 'M':
+		// .M commands should not exceed 256 bytes
+		if len(line) > 256 {
+			p.log.Error(".M command exceeds 256 bytes")
+			p.handleErrorResponse(line)
+			return
+		}
+		handler, ok := p.commandHandlers[DotM]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotS),
+			)
+			return
+		}
+		cmd, err := DecodeDotM(line[2:])
+		if err != nil {
+			p.log.Error(
+				".M command received, but invalid arguments",
+				"Cmd",
+				string(line),
+				"Error",
+				err.Error(),
+			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
+			return
+		}
+		handler(p, cmd)
+
 	case 'B':
 		switch p.cmdType(line) {
 		case 'L':
@@ -303,7 +333,6 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		case 'I':
 		case 'A':
 			// Response for .B request
-			p.handleResponse(line)
 		default:
 			p.handleUnknownCmd(line)
 		}
@@ -318,7 +347,6 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		case 'L', 'M':
 		case 'A':
 			// Response for .R request, or a .W request
-			p.handleResponse(line)
 		default:
 			p.handleUnknownCmd(line)
 		}
@@ -347,6 +375,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleUnknownCmd(line)
 		}
 	case 'A':
+		// General response
 		p.handleResponse(line)
 	case 'E':
 		p.handleErrorResponse(line)
@@ -382,13 +411,34 @@ func (p *QuartzProtocol) sendLine(line []byte) error {
 	}
 }
 
-func (p *QuartzProtocol) handleUpdate(line []byte)   {}
-func (p *QuartzProtocol) handleResponse(line []byte) {}
+func (p *QuartzProtocol) handleUpdate(line []byte) {}
+func (p *QuartzProtocol) handleResponse(line []byte) {
+	handler, ok := p.commandHandlers[DotA]
+	if !ok {
+		p.log.Warn(
+			"No matching handler found for command",
+			"Cmd",
+			string(DotA),
+		)
+		return
+	}
+	cmd, err := DecodeDotA(line[1:])
+	if err != nil {
+		p.log.Error(
+			".A received, but invalid structure",
+			"Line",
+			string(line),
+		)
+		return
+	}
+	// TODO: This blocks the go routine
+	handler(p, cmd)
+}
 
 func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 	handler, ok := p.commandHandlers[DotE]
 	if !ok {
-		p.log.Error(
+		p.log.Warn(
 			"No matching handler found for command",
 			"Cmd",
 			string(DotE),

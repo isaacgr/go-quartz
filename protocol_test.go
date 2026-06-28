@@ -21,7 +21,7 @@ func TestReadLinesPartialMessage(t *testing.T) {
 	defer p.Stop()
 
 	p.AddCommandHandler(DotS, func(p *QuartzProtocol, cmd any) {
-		r, ok := cmd.(*DotSCmd)
+		r, ok := cmd.(*SetXptCmd)
 		if !ok {
 			t.Errorf(
 				"Incorrect response received. got=%v, expected=.S",
@@ -173,11 +173,11 @@ func TestQuartzProtocolDotSValidRoute(t *testing.T) {
 		receiver.Stop()
 	})
 
-	var resp *DotSCmd
+	var resp *SetXptCmd
 	wg.Add(1)
 
 	receiver.AddCommandHandler(DotS, func(p *QuartzProtocol, cmd any) {
-		r, ok := cmd.(*DotSCmd)
+		r, ok := cmd.(*SetXptCmd)
 		if !ok {
 			t.Errorf(
 				"Incorrect response received. got=%v, expected=.E",
