@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -30,8 +31,16 @@ type DotAResp struct{}
 type DotEResp struct{}
 type SetXptCmd struct {
 	levels []string
-	dst    string
-	src    string
+	dst    int
+	src    int
+}
+type DstLockCmd struct {
+	dst    int
+	locked bool
+}
+type DstLockStatus struct {
+	dst    int
+	status bool
 }
 
 func DecodeDotA(line []byte) (*DotAResp, error) {
@@ -61,8 +70,14 @@ func DecodeDotS(line []byte) (*SetXptCmd, error) {
 	matches := dotSRegexp.FindStringSubmatch(string(line))
 	if matches != nil {
 		levels := strings.Split(matches[1], "")
-		dst := matches[2]
-		src := matches[2]
+		dst, err := strconv.Atoi(matches[2])
+		if err != nil {
+			return nil, &DecodeError{".S", "Cannot infer destination index"}
+		}
+		src, err := strconv.Atoi(matches[3])
+		if err != nil {
+			return nil, &DecodeError{".S", "Cannot infer source index"}
+		}
 		return &SetXptCmd{
 			levels: levels,
 			dst:    dst,
@@ -77,6 +92,10 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 	if !ok {
 		return nil, &DecodeError{".M", string(line)}
 	}
+	resp := []*SetXptCmd{}
+	// TODO: The plus sign case is confusing, because it seems to indicate
+	// that a src can have a +, but I'm not sure how that makes sense since
+	// its not appending any different type (like a new level)
 	if bytes.Index(line, []byte("+")) > 0 {
 		// Valid .M regex pattern, but we need to specifically test and extract
 		// the case where + is used
@@ -86,21 +105,30 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 		}
 		matches := dotMPlusRegexp.FindAllStringSubmatch(string(line), -1)
 		if matches != nil {
-
+			return nil, &DecodeError{".S", "Invalid request"}
 		}
 
 	}
 	// It did compile using the other syntax
 	matches := dotMRegexp.FindAllStringSubmatch(string(line), -1)
 	if matches != nil {
-		resp := []*SetXptCmd{}
 		if len(matches) > 1 {
 			// Must be the 'simple case' (i.e. .MV1,1,A1,1...)
 			for _, m := range matches {
+				dst, err := strconv.Atoi(m[2])
+				if err != nil {
+					return nil, &DecodeError{
+						".M", "Cannot infer destination index",
+					}
+				}
+				src, err := strconv.Atoi(m[3])
+				if err != nil {
+					return nil, &DecodeError{".M", "Cannot infer source index"}
+				}
 				resp = append(resp, &SetXptCmd{
 					levels: []string{m[1]},
-					src:    m[2],
-					dst:    m[3],
+					src:    dst,
+					dst:    src,
 				})
 			}
 			return resp, nil
@@ -109,13 +137,93 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 		ok := dotSRegexp.Match(line)
 		if !ok {
 			// Might be the range case
-			return nil, &DecodeError{".M", "Invalid request"}
+			match := matches[0]
+			levels := strings.Split(match[1], "")
+			dstRange := strings.Split(match[2], "-")
+			srcRange := strings.Split(match[3], "-")
+			if len(dstRange) > 1 && len(srcRange) > 1 {
+				if len(dstRange) != len(srcRange) {
+					return nil, &DecodeError{
+						".M", "Unequal source and dest ranges",
+					}
+				}
+				for i, d := range dstRange {
+					s := srcRange[i]
+					dst, err := strconv.Atoi(d)
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer destination index",
+						}
+					}
+					src, err := strconv.Atoi(s)
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer source index",
+						}
+					}
+					resp = append(resp, &SetXptCmd{
+						levels: levels,
+						dst:    dst,
+						src:    src,
+					})
+				}
+				return resp, nil
+			} else if len(dstRange) > 1 && len(srcRange) == 1 {
+				for _, d := range dstRange {
+					dst, err := strconv.Atoi(d)
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer destination index",
+						}
+					}
+					src, err := strconv.Atoi(srcRange[0])
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer source index",
+						}
+					}
+					resp = append(resp, &SetXptCmd{
+						levels: levels,
+						dst:    dst,
+						src:    src,
+					})
+				}
+				return resp, nil
+
+			} else if len(srcRange) > 1 && len(dstRange) == 1 {
+				for _, d := range dstRange {
+					dst, err := strconv.Atoi(d)
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer destination index",
+						}
+					}
+					src, err := strconv.Atoi(srcRange[0])
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer source index",
+						}
+					}
+					resp = append(resp, &SetXptCmd{
+						levels: levels,
+						dst:    dst,
+						src:    src,
+					})
+				}
+				return resp, nil
+			}
 		}
 		matches := dotSRegexp.FindStringSubmatch(string(line))
 		if matches != nil {
 			levels := strings.Split(matches[1], "")
-			dst := matches[2]
-			src := matches[2]
+			dst, err := strconv.Atoi(matches[2])
+			if err != nil {
+				return nil, &DecodeError{".M", "Cannot infer destination index"}
+			}
+			src, err := strconv.Atoi(matches[3])
+			if err != nil {
+				return nil, &DecodeError{".M", "Cannot infer source index"}
+			}
 			resp = append(resp, &SetXptCmd{
 				levels: levels,
 				src:    src,

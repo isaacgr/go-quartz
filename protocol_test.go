@@ -28,9 +28,9 @@ func TestReadLinesPartialMessage(t *testing.T) {
 				cmd,
 			)
 		}
-		if r.dst != "1" || r.src != "1" {
+		if r.dst != 1 || r.src != 2 {
 			t.Errorf(
-				"incorrect route: got dst=%s src=%s, want dst=1, src=1",
+				"incorrect route: got dst=%d src=%d, want dst=1, src=2",
 				r.dst,
 				r.src,
 			)
@@ -46,7 +46,7 @@ func TestReadLinesPartialMessage(t *testing.T) {
 
 	client.Write([]byte(".SV1"))
 	time.Sleep(time.Duration(1 * time.Second))
-	client.Write([]byte(",1\r"))
+	client.Write([]byte(",2\r"))
 }
 
 func TestUnknownCmdLogsWarning(t *testing.T) {
@@ -185,9 +185,9 @@ func TestQuartzProtocolDotSValidRoute(t *testing.T) {
 			)
 		}
 
-		if r.dst != "1" || r.src != "1" {
+		if r.dst != 1 || r.src != 1 {
 			t.Errorf(
-				"incorrect route: got dst=%s src=%s, want dst=1, src=1",
+				"incorrect route: got dst=%d src=%d, want dst=1, src=1",
 				r.dst,
 				r.src,
 			)

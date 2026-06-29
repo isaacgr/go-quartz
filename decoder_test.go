@@ -2,39 +2,6 @@ package goquartz
 
 import "testing"
 
-func TestDecodeDotS(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   []byte
-		wantErr bool
-	}{
-		{"valid single digit", []byte("V1,1"), false},
-		{"valid multi-level", []byte("VABCDEFGHIJKLMNOP1,1"), false},
-		{"valid multi digit", []byte("VAB001,001"), false},
-		{"invalid multi-level", []byte("VABCDEFGHIJKLMNOPQ1,1"), true},
-		{"no digits", []byte("V,"), true},
-		{"missing comma", []byte("V11"), true},
-		{"starts with digit", []byte("1V,1"), true},
-		{"empty", []byte(""), true},
-		{"lowercase", []byte("v1,1"), true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeDotS(tt.input)
-			if err != nil {
-				if !tt.wantErr {
-					t.Errorf(
-						"DecodeDotS(%q) error = %v, wantErr %v",
-						tt.input,
-						err,
-						tt.wantErr,
-					)
-				}
-			}
-		})
-	}
-}
-
 func TestDecodeDotE(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -93,6 +60,39 @@ func TestDecodeDotA(t *testing.T) {
 	}
 }
 
+func TestDecodeDotS(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantErr bool
+	}{
+		{"valid single digit", []byte("V1,1"), false},
+		{"valid multi-level", []byte("VABCDEFGHIJKLMNOP1,1"), false},
+		{"valid multi digit", []byte("VAB001,001"), false},
+		{"invalid multi-level", []byte("VABCDEFGHIJKLMNOPQ1,1"), true},
+		{"no digits", []byte("V,"), true},
+		{"missing comma", []byte("V11"), true},
+		{"starts with digit", []byte("1V,1"), true},
+		{"empty", []byte(""), true},
+		{"lowercase", []byte("v1,1"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeDotS(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotS(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			}
+		})
+	}
+}
+
 func TestDecodeDotM(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -107,7 +107,7 @@ func TestDecodeDotM(t *testing.T) {
 		{"valid dest range multi digit", []byte("VA001-005,001"), false},
 		{"valid src range", []byte("VA1-5,10-14"), false},
 		{"valid src range multi digit", []byte("VA001-005,010-014"), false},
-		{"valid dest level +", []byte("V1+A1+B2,1"), false},
+		{"valid dest level add param", []byte("V1+A1+B2,1"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,4 +125,3 @@ func TestDecodeDotM(t *testing.T) {
 		})
 	}
 }
-
