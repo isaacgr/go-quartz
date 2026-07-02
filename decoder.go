@@ -13,6 +13,7 @@ var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
 var dotSRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
 var dotMRegexp *regexp.Regexp = regexp.MustCompile("([A-Za-z]+)?([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*),([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*)")
 var dotMPlusRegexp *regexp.Regexp = regexp.MustCompile(`([A-Za-z]+)?(\d+)`)
+var dotBRegexp *regexp.Regexp = regexp.MustCompile("([LUIA])([0-9]{1,})(,[0-9]{1,})?$")
 
 type DecodeError struct {
 	Cmd  string
@@ -30,17 +31,14 @@ func (e *DecodeError) Error() string {
 type DotAResp struct{}
 type DotEResp struct{}
 type SetXptCmd struct {
-	levels []string
-	dst    int
-	src    int
+	Levels []string
+	Dst    int
+	Src    int
 }
 type DstLockCmd struct {
-	dst    int
-	locked bool
-}
-type DstLockStatus struct {
-	dst    int
-	status bool
+	Dst    int
+	Type   string
+	Locked int
 }
 
 func DecodeDotA(line []byte) (*DotAResp, error) {
@@ -105,133 +103,164 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 		}
 		matches := dotMPlusRegexp.FindAllStringSubmatch(string(line), -1)
 		if matches != nil {
-			return nil, &DecodeError{".S", "Invalid request"}
 		}
-
-	}
-	// It did compile using the other syntax
-	matches := dotMRegexp.FindAllStringSubmatch(string(line), -1)
-	if matches != nil {
-		if len(matches) > 1 {
-			// Must be the 'simple case' (i.e. .MV1,1,A1,1...)
-			for _, m := range matches {
-				dst, err := strconv.Atoi(m[2])
-				if err != nil {
-					return nil, &DecodeError{
-						".M", "Cannot infer destination index",
+	} else {
+		// It did compile using the other syntax
+		matches := dotMRegexp.FindAllStringSubmatch(string(line), -1)
+		if matches != nil {
+			if len(matches) > 1 {
+				// Must be the 'simple case' (i.e. .MV1,1,A1,1...)
+				for _, m := range matches {
+					dst, err := strconv.Atoi(m[2])
+					if err != nil {
+						return nil, &DecodeError{
+							".M", "Cannot infer destination index",
+						}
 					}
+					src, err := strconv.Atoi(m[3])
+					if err != nil {
+						return nil, &DecodeError{".M", "Cannot infer source index"}
+					}
+					resp = append(resp, &SetXptCmd{
+						levels: []string{m[1]},
+						src:    dst,
+						dst:    src,
+					})
 				}
-				src, err := strconv.Atoi(m[3])
+				return resp, nil
+			}
+			// Range case or like .S (i.e. .MV1,1)
+			ok := dotSRegexp.Match(line)
+			if !ok {
+				// Might be the range case
+				match := matches[0]
+				levels := strings.Split(match[1], "")
+				dstRange := strings.Split(match[2], "-")
+				srcRange := strings.Split(match[3], "-")
+				if len(dstRange) > 1 && len(srcRange) > 1 {
+					if len(dstRange) != len(srcRange) {
+						return nil, &DecodeError{
+							".M", "Unequal source and dest ranges",
+						}
+					}
+					for i, d := range dstRange {
+						s := srcRange[i]
+						dst, err := strconv.Atoi(d)
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer destination index",
+							}
+						}
+						src, err := strconv.Atoi(s)
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer source index",
+							}
+						}
+						resp = append(resp, &SetXptCmd{
+							levels: levels,
+							dst:    dst,
+							src:    src,
+						})
+					}
+					return resp, nil
+				} else if len(dstRange) > 1 && len(srcRange) == 1 {
+					for _, d := range dstRange {
+						dst, err := strconv.Atoi(d)
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer destination index",
+							}
+						}
+						src, err := strconv.Atoi(srcRange[0])
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer source index",
+							}
+						}
+						resp = append(resp, &SetXptCmd{
+							levels: levels,
+							dst:    dst,
+							src:    src,
+						})
+					}
+					return resp, nil
+
+				} else if len(srcRange) > 1 && len(dstRange) == 1 {
+					for _, d := range dstRange {
+						dst, err := strconv.Atoi(d)
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer destination index",
+							}
+						}
+						src, err := strconv.Atoi(srcRange[0])
+						if err != nil {
+							return nil, &DecodeError{
+								".M", "Cannot infer source index",
+							}
+						}
+						resp = append(resp, &SetXptCmd{
+							levels: levels,
+							dst:    dst,
+							src:    src,
+						})
+					}
+					return resp, nil
+				}
+			}
+			matches := dotSRegexp.FindStringSubmatch(string(line))
+			if matches != nil {
+				levels := strings.Split(matches[1], "")
+				dst, err := strconv.Atoi(matches[2])
+				if err != nil {
+					return nil, &DecodeError{".M", "Cannot infer destination index"}
+				}
+				src, err := strconv.Atoi(matches[3])
 				if err != nil {
 					return nil, &DecodeError{".M", "Cannot infer source index"}
 				}
 				resp = append(resp, &SetXptCmd{
-					levels: []string{m[1]},
-					src:    dst,
-					dst:    src,
+					levels: levels,
+					src:    src,
+					dst:    dst,
 				})
+				return resp, nil
 			}
-			return resp, nil
 		}
-		// Range case or like .S (i.e. .MV1,1)
-		ok := dotSRegexp.Match(line)
-		if !ok {
-			// Might be the range case
-			match := matches[0]
-			levels := strings.Split(match[1], "")
-			dstRange := strings.Split(match[2], "-")
-			srcRange := strings.Split(match[3], "-")
-			if len(dstRange) > 1 && len(srcRange) > 1 {
-				if len(dstRange) != len(srcRange) {
-					return nil, &DecodeError{
-						".M", "Unequal source and dest ranges",
-					}
-				}
-				for i, d := range dstRange {
-					s := srcRange[i]
-					dst, err := strconv.Atoi(d)
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer destination index",
-						}
-					}
-					src, err := strconv.Atoi(s)
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer source index",
-						}
-					}
-					resp = append(resp, &SetXptCmd{
-						levels: levels,
-						dst:    dst,
-						src:    src,
-					})
-				}
-				return resp, nil
-			} else if len(dstRange) > 1 && len(srcRange) == 1 {
-				for _, d := range dstRange {
-					dst, err := strconv.Atoi(d)
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer destination index",
-						}
-					}
-					src, err := strconv.Atoi(srcRange[0])
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer source index",
-						}
-					}
-					resp = append(resp, &SetXptCmd{
-						levels: levels,
-						dst:    dst,
-						src:    src,
-					})
-				}
-				return resp, nil
 
-			} else if len(srcRange) > 1 && len(dstRange) == 1 {
-				for _, d := range dstRange {
-					dst, err := strconv.Atoi(d)
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer destination index",
-						}
-					}
-					src, err := strconv.Atoi(srcRange[0])
-					if err != nil {
-						return nil, &DecodeError{
-							".M", "Cannot infer source index",
-						}
-					}
-					resp = append(resp, &SetXptCmd{
-						levels: levels,
-						dst:    dst,
-						src:    src,
-					})
-				}
-				return resp, nil
-			}
-		}
-		matches := dotSRegexp.FindStringSubmatch(string(line))
-		if matches != nil {
-			levels := strings.Split(matches[1], "")
-			dst, err := strconv.Atoi(matches[2])
-			if err != nil {
-				return nil, &DecodeError{".M", "Cannot infer destination index"}
-			}
-			src, err := strconv.Atoi(matches[3])
-			if err != nil {
-				return nil, &DecodeError{".M", "Cannot infer source index"}
-			}
-			resp = append(resp, &SetXptCmd{
-				levels: levels,
-				src:    src,
-				dst:    dst,
-			})
-			return resp, nil
-		}
 	}
-
 	return nil, &DecodeError{".M", "Invalid request"}
+}
+
+func DecodeDotB(line []byte) (*DstLockCmd, error) {
+	// .BL1 OR .BU1 OR .BI1 OR .BA1,<0-255>
+	ok := dotERegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{".B", string(line)}
+	}
+	matches := dotBRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		cmdType := matches[0]
+		dest, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return nil, &DecodeError{".B", string(line)}
+		}
+		var locked int
+		if cmdType == "A" {
+			if len(matches) < 3 {
+				return nil, &DecodeError{".B", string(line)}
+			}
+			locked, err = strconv.Atoi(strings.Split(matches[2], ",")[1])
+			if err != nil {
+				return nil, &DecodeError{".B", string(line)}
+			}
+		}
+		return &DstLockCmd{
+			Dst:    dest,
+			Type:   cmdType,
+			Locked: locked,
+		}, nil
+	}
+	return &DstLockCmd{}, nil
 }

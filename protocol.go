@@ -22,6 +22,7 @@ const (
 	DotA Cmd = 'A'
 	DotS Cmd = 'S'
 	DotM Cmd = 'M'
+	DotB Cmd = 'B'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -291,7 +292,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case 'M':
-		// .M commands should not exceed 256 bytes
+		// .M commands must not exceed 256 bytes
 		if len(line) > 256 {
 			p.log.Error(".M command exceeds 256 bytes")
 			p.handleErrorResponse(line)
@@ -302,7 +303,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.log.Error(
 				"No matching handler found for command",
 				"Cmd",
-				string(DotS),
+				string(DotM),
 			)
 			return
 		}
@@ -325,17 +326,35 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			return
 		}
 		handler(p, cmd)
-
 	case 'B':
-		switch p.cmdType(line) {
-		case 'L':
-		case 'U':
-		case 'I':
-		case 'A':
-			// Response for .B request
-		default:
-			p.handleUnknownCmd(line)
+		handler, ok := p.commandHandlers[DotB]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotB),
+			)
+			return
 		}
+		cmd, err := DecodeDotM(line[2:])
+		if err != nil {
+			p.log.Error(
+				".M command received, but invalid arguments",
+				"Cmd",
+				string(line),
+				"Error",
+				err.Error(),
+			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
+			return
+		}
+		handler(p, cmd)
 	case 'F':
 	case 'I':
 	case 'C':
