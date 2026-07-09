@@ -77,9 +77,9 @@ func DecodeDotS(line []byte) (*SetXptCmd, error) {
 			return nil, &DecodeError{".S", "Cannot infer source index"}
 		}
 		return &SetXptCmd{
-			levels: levels,
-			dst:    dst,
-			src:    src,
+			Levels: levels,
+			Dst:    dst,
+			Src:    src,
 		}, nil
 	}
 	return nil, &DecodeError{".S", "Invalid request"}
@@ -122,9 +122,9 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						return nil, &DecodeError{".M", "Cannot infer source index"}
 					}
 					resp = append(resp, &SetXptCmd{
-						levels: []string{m[1]},
-						src:    dst,
-						dst:    src,
+						Levels: []string{m[1]},
+						Src:    dst,
+						Dst:    src,
 					})
 				}
 				return resp, nil
@@ -158,9 +158,9 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 							}
 						}
 						resp = append(resp, &SetXptCmd{
-							levels: levels,
-							dst:    dst,
-							src:    src,
+							Levels: levels,
+							Dst:    dst,
+							Src:    src,
 						})
 					}
 					return resp, nil
@@ -179,9 +179,9 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 							}
 						}
 						resp = append(resp, &SetXptCmd{
-							levels: levels,
-							dst:    dst,
-							src:    src,
+							Levels: levels,
+							Dst:    dst,
+							Src:    src,
 						})
 					}
 					return resp, nil
@@ -201,9 +201,9 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 							}
 						}
 						resp = append(resp, &SetXptCmd{
-							levels: levels,
-							dst:    dst,
-							src:    src,
+							Levels: levels,
+							Dst:    dst,
+							Src:    src,
 						})
 					}
 					return resp, nil
@@ -221,9 +221,9 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 					return nil, &DecodeError{".M", "Cannot infer source index"}
 				}
 				resp = append(resp, &SetXptCmd{
-					levels: levels,
-					src:    src,
-					dst:    dst,
+					Levels: levels,
+					Src:    src,
+					Dst:    dst,
 				})
 				return resp, nil
 			}
@@ -235,20 +235,20 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 
 func DecodeDotB(line []byte) (*DstLockCmd, error) {
 	// .BL1 OR .BU1 OR .BI1 OR .BA1,<0-255>
-	ok := dotERegexp.Match(line)
+	ok := dotBRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{".B", string(line)}
 	}
 	matches := dotBRegexp.FindStringSubmatch(string(line))
 	if matches != nil {
-		cmdType := matches[0]
-		dest, err := strconv.Atoi(matches[1])
+		cmdType := matches[1]
+		dest, err := strconv.Atoi(matches[2])
 		if err != nil {
 			return nil, &DecodeError{".B", string(line)}
 		}
 		var locked int
 		if cmdType == "A" {
-			if len(matches) < 3 {
+			if len(matches) < 4 {
 				return nil, &DecodeError{".B", string(line)}
 			}
 			locked, err = strconv.Atoi(strings.Split(matches[2], ",")[1])

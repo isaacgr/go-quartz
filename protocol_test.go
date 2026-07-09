@@ -28,17 +28,17 @@ func TestReadLinesPartialMessage(t *testing.T) {
 				cmd,
 			)
 		}
-		if r.dst != 1 || r.src != 2 {
+		if r.Dst != 1 || r.Src != 2 {
 			t.Errorf(
 				"incorrect route: got dst=%d src=%d, want dst=1, src=2",
-				r.dst,
-				r.src,
+				r.Dst,
+				r.Src,
 			)
 		}
 
-		if len(r.levels) != 1 && r.levels[0] != "V" {
+		if len(r.Levels) != 1 && r.Levels[0] != "V" {
 			t.Errorf(
-				"incrorrect levels received: got %v, want=V", r.levels,
+				"incrorrect levels received: got %v, want=V", r.Levels,
 			)
 		}
 
@@ -185,17 +185,17 @@ func TestQuartzProtocolDotSValidRoute(t *testing.T) {
 			)
 		}
 
-		if r.dst != 1 || r.src != 1 {
+		if r.Dst != 1 || r.Src != 1 {
 			t.Errorf(
 				"incorrect route: got dst=%d src=%d, want dst=1, src=1",
-				r.dst,
-				r.src,
+				r.Dst,
+				r.Src,
 			)
 		}
 
-		if len(r.levels) != 1 && r.levels[0] != "V" {
+		if len(r.Levels) != 1 && r.Levels[0] != "V" {
 			t.Errorf(
-				"incrorrect levels received: got %v, want=V", r.levels,
+				"incrorrect levels received: got %v, want=V", r.Levels,
 			)
 		}
 

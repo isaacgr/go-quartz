@@ -125,3 +125,59 @@ func TestDecodeDotM(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeDotB(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DstLockCmd
+		wantErr bool
+	}{
+		{
+			"valid lock",
+			[]byte("L1"),
+			&DstLockCmd{
+				Dst:    1,
+				Type:   "L",
+				Locked: 0,
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotB(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotB(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			}
+			if cmd.Dst != tt.wantCmd.Dst {
+				t.Errorf(
+					"Incorrect dst received. got=%v, want=%v",
+					cmd,
+					tt.wantCmd,
+				)
+			}
+			if cmd.Locked != tt.wantCmd.Locked {
+				t.Errorf(
+					"Incorrect lock state received. got=%v, want=%v",
+					cmd,
+					tt.wantCmd,
+				)
+			}
+			if cmd.Type != tt.wantCmd.Type {
+				t.Errorf(
+					"Incorrect lock type received. got=%v, want=%v",
+					cmd,
+					tt.wantCmd,
+				)
+			}
+		})
+	}
+}

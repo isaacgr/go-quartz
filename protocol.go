@@ -336,7 +336,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			)
 			return
 		}
-		cmd, err := DecodeDotM(line[2:])
+		cmd, err := DecodeDotB(line[2:])
 		if err != nil {
 			p.log.Error(
 				".M command received, but invalid arguments",
