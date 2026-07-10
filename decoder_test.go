@@ -126,7 +126,12 @@ func TestDecodeDotM(t *testing.T) {
 	}
 }
 
+func makeIntPointer(v int) *int {
+	return &v
+}
+
 func TestDecodeDotB(t *testing.T) {
+
 	tests := []struct {
 		name    string
 		input   []byte
@@ -137,11 +142,70 @@ func TestDecodeDotB(t *testing.T) {
 			"valid lock",
 			[]byte("L1"),
 			&DstLockCmd{
-				Dst:    1,
-				Type:   "L",
-				Locked: 0,
+				Dst:  1,
+				Type: "L",
 			},
 			false,
+		},
+		{
+			"valid unlock",
+			[]byte("U1"),
+			&DstLockCmd{
+				Dst:  1,
+				Type: "U",
+			},
+			false,
+		},
+		{
+			"valid inspect",
+			[]byte("I1"),
+			&DstLockCmd{
+				Dst:  1,
+				Type: "I",
+			},
+			false,
+		},
+		{
+			"invalid command type",
+			[]byte("X1"),
+			nil,
+			true,
+		},
+		{
+			"valid acknowledge no lock",
+			[]byte("A1,0"),
+			&DstLockCmd{
+				Dst:    1,
+				Type:   "A",
+				Locked: makeIntPointer(0),
+			},
+			false,
+		},
+		{
+			"valid acknowledge lock 1",
+			[]byte("A1,1"),
+			&DstLockCmd{
+				Dst:    1,
+				Type:   "A",
+				Locked: makeIntPointer(1),
+			},
+			false,
+		},
+		{
+			"valid acknowledge lock 255",
+			[]byte("A1,255"),
+			&DstLockCmd{
+				Dst:    1,
+				Type:   "A",
+				Locked: makeIntPointer(255),
+			},
+			false,
+		},
+		{
+			"invalid acknowledge",
+			[]byte("A"),
+			nil,
+			true,
 		},
 	}
 	for _, tt := range tests {
@@ -156,27 +220,130 @@ func TestDecodeDotB(t *testing.T) {
 						tt.wantErr,
 					)
 				}
+			} else {
+				if cmd.Dst != tt.wantCmd.Dst {
+					t.Errorf(
+						"Incorrect dst received. got=%v, want=%v",
+						cmd,
+						tt.wantCmd,
+					)
+				}
+				if cmd.Locked != nil && tt.wantCmd != nil {
+					if *cmd.Locked != *tt.wantCmd.Locked {
+						t.Errorf(
+							"Incorrect lock state received. got=%v, want=%v",
+							cmd,
+							tt.wantCmd,
+						)
+					}
+				}
+				if cmd.Type != tt.wantCmd.Type {
+					t.Errorf(
+						"Incorrect lock type received. got=%v, want=%v",
+						cmd,
+						tt.wantCmd,
+					)
+				}
 			}
-			if cmd.Dst != tt.wantCmd.Dst {
-				t.Errorf(
-					"Incorrect dst received. got=%v, want=%v",
-					cmd,
-					tt.wantCmd,
-				)
-			}
-			if cmd.Locked != tt.wantCmd.Locked {
-				t.Errorf(
-					"Incorrect lock state received. got=%v, want=%v",
-					cmd,
-					tt.wantCmd,
-				)
-			}
-			if cmd.Type != tt.wantCmd.Type {
-				t.Errorf(
-					"Incorrect lock type received. got=%v, want=%v",
-					cmd,
-					tt.wantCmd,
-				)
+		})
+	}
+}
+
+func TestDecodeDotF(t *testing.T) {
+
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotFCmd
+		wantErr bool
+	}{
+		{
+			"valid lock 1",
+			[]byte("1"),
+			&DotFCmd{
+				Salvo: 1,
+			},
+			false,
+		},
+		{
+			"valid lock 01",
+			[]byte("01"),
+			&DotFCmd{
+				Salvo: 1,
+			},
+			false,
+		},
+		{
+			"valid lock 001",
+			[]byte("001"),
+			&DotFCmd{
+				Salvo: 1,
+			},
+			false,
+		},
+		{
+			"valid lock 10",
+			[]byte("10"),
+			&DotFCmd{
+				Salvo: 10,
+			},
+			false,
+		},
+		{
+			"valid lock 32",
+			[]byte("32"),
+			&DotFCmd{
+				Salvo: 32,
+			},
+			false,
+		},
+		{
+			"valid lock 032",
+			[]byte("032"),
+			&DotFCmd{
+				Salvo: 32,
+			},
+			false,
+		},
+		{
+			"invalid lock 0",
+			[]byte("0"),
+			nil,
+			true,
+		},
+		{
+			"invalid lock 000",
+			[]byte("000"),
+			nil,
+			true,
+		},
+		{
+			"invalid lock x",
+			[]byte("x"),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotF(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotF(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			} else {
+				if cmd.Salvo != tt.wantCmd.Salvo {
+					t.Errorf(
+						"Incorrect salvo received. got=%v, want=%v",
+						cmd,
+						tt.wantCmd,
+					)
+				}
 			}
 		})
 	}

@@ -13,7 +13,8 @@ var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
 var dotSRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
 var dotMRegexp *regexp.Regexp = regexp.MustCompile("([A-Za-z]+)?([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*),([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*)")
 var dotMPlusRegexp *regexp.Regexp = regexp.MustCompile(`([A-Za-z]+)?(\d+)`)
-var dotBRegexp *regexp.Regexp = regexp.MustCompile("([LUIA])([0-9]{1,})(,[0-9]{1,})?$")
+var dotBRegexp *regexp.Regexp = regexp.MustCompile("^([LUIA])([0-9]{1,})(,[0-9]{1,})?$")
+var dotFRegexp *regexp.Regexp = regexp.MustCompile("^[0-9]{1,3}$")
 
 type DecodeError struct {
 	Cmd  string
@@ -38,7 +39,10 @@ type SetXptCmd struct {
 type DstLockCmd struct {
 	Dst    int
 	Type   string
-	Locked int
+	Locked *int
+}
+type DotFCmd struct {
+	Salvo int
 }
 
 func DecodeDotA(line []byte) (*DotAResp, error) {
@@ -241,26 +245,54 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 	}
 	matches := dotBRegexp.FindStringSubmatch(string(line))
 	if matches != nil {
+		var dest int
+		var err error
 		cmdType := matches[1]
-		dest, err := strconv.Atoi(matches[2])
+		dest, err = strconv.Atoi(matches[2])
 		if err != nil {
 			return nil, &DecodeError{".B", string(line)}
 		}
-		var locked int
+
+		cmd := &DstLockCmd{
+			Dst:  dest,
+			Type: cmdType,
+		}
+
 		if cmdType == "A" {
 			if len(matches) < 4 {
 				return nil, &DecodeError{".B", string(line)}
 			}
-			locked, err = strconv.Atoi(strings.Split(matches[2], ",")[1])
+			locked, err := strconv.Atoi(strings.Split(matches[3], ",")[1])
 			if err != nil {
 				return nil, &DecodeError{".B", string(line)}
 			}
+
+			cmd.Locked = &locked
 		}
-		return &DstLockCmd{
-			Dst:    dest,
-			Type:   cmdType,
-			Locked: locked,
+		return cmd, nil
+	}
+	return nil, &DecodeError{".B", "Invalid request"}
+}
+
+func DecodeDotF(line []byte) (*DotFCmd, error) {
+	// .F1, .F001, .F01,... .F032, .F32
+	ok := dotFRegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{".F", string(line)}
+	}
+	matches := dotFRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		val, err := strconv.Atoi(matches[0])
+		if err != nil {
+			return nil, &DecodeError{".F", string(line)}
+		}
+		if val > 32 || val < 1 {
+			return nil, &DecodeError{".F", string(line)}
+		}
+		return &DotFCmd{
+			Salvo: val,
 		}, nil
 	}
-	return &DstLockCmd{}, nil
+
+	return nil, &DecodeError{".F", "Invalid request"}
 }

@@ -23,6 +23,7 @@ const (
 	DotS Cmd = 'S'
 	DotM Cmd = 'M'
 	DotB Cmd = 'B'
+	DotF Cmd = 'F'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -339,7 +340,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		cmd, err := DecodeDotB(line[2:])
 		if err != nil {
 			p.log.Error(
-				".M command received, but invalid arguments",
+				".B command received, but invalid arguments",
 				"Cmd",
 				string(line),
 				"Error",
@@ -356,6 +357,34 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case 'F':
+		handler, ok := p.commandHandlers[DotF]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotF),
+			)
+			return
+		}
+		cmd, err := DecodeDotF(line[2:])
+		if err != nil {
+			p.log.Error(
+				".F command received, but invalid arguments",
+				"Cmd",
+				string(line),
+				"Error",
+				err.Error(),
+			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
+			return
+		}
+		handler(p, cmd)
 	case 'I':
 	case 'C':
 	case 'L':
