@@ -348,3 +348,171 @@ func TestDecodeDotF(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeDotI(t *testing.T) {
+
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotICmd
+		wantErr bool
+	}{
+		{
+			"valid V1",
+			[]byte("V1"),
+			&DotICmd{
+				Level: "V",
+				Dst:   1,
+			},
+			false,
+		},
+		{
+			"valid V01",
+			[]byte("V01"),
+			&DotICmd{
+				Level: "V",
+				Dst:   1,
+			},
+			false,
+		},
+		{
+			"invalid V0",
+			[]byte("V0"),
+			nil,
+			true,
+		},
+		{
+			"invalid v1",
+			[]byte("v1"),
+			nil,
+			true,
+		},
+		{
+			"invalid VA1",
+			[]byte("VA1"),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotI(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotI(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			} else {
+				if cmd.Level != tt.wantCmd.Level {
+					t.Errorf(
+						"Incorrect level received. got=%v, want=%v",
+						cmd,
+						tt.wantCmd,
+					)
+				}
+				if cmd.Dst != tt.wantCmd.Dst {
+					t.Errorf(
+						"Incorrect dst received. got=%v, want=%v",
+						cmd,
+						tt.wantCmd,
+					)
+				}
+			}
+		})
+	}
+}
+
+func TestDecodeDotL(t *testing.T) {
+
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotLCmd
+		wantErr bool
+	}{
+		{
+			"valid V1,-",
+			[]byte("V1,-"),
+			&DotLCmd{
+				Level: "V",
+				Dst:   1,
+			},
+			false,
+		},
+		{
+			"valid V01,-",
+			[]byte("V01,-"),
+			&DotLCmd{
+				Level: "V",
+				Dst:   1,
+			},
+			false,
+		},
+		{
+			"valid V1,1",
+			[]byte("V1,1"),
+			&DotLCmd{
+				Level: "V",
+				Dst:   1,
+				Src:   makeIntPointer(1),
+			},
+			false,
+		},
+		{
+			"invalid V1",
+			[]byte("V1"),
+			nil,
+			true,
+		},
+		{
+			"invalid V1,-1",
+			[]byte("V1,-1"),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotL(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotL(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf(
+						"DecodeDotL(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				} else {
+					if cmd.Level != tt.wantCmd.Level {
+						t.Errorf(
+							"Incorrect level received. got=%v, want=%v",
+							cmd,
+							tt.wantCmd,
+						)
+					}
+					if cmd.Dst != tt.wantCmd.Dst {
+						t.Errorf(
+							"Incorrect dst received. got=%v, want=%v",
+							cmd,
+							tt.wantCmd,
+						)
+					}
+
+				}
+			}
+		})
+	}
+}

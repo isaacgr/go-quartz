@@ -24,6 +24,8 @@ const (
 	DotM Cmd = 'M'
 	DotB Cmd = 'B'
 	DotF Cmd = 'F'
+	DotI Cmd = 'I'
+	DotL Cmd = 'L'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -386,42 +388,76 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case 'I':
+		handler, ok := p.commandHandlers[DotI]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotI),
+			)
+			return
+		}
+		cmd, err := DecodeDotI(line[2:])
+		if err != nil {
+			p.log.Error(
+				".I command received, but invalid arguments",
+				"Cmd",
+				string(line),
+				"Error",
+				err.Error(),
+			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
+			return
+		}
+		handler(p, cmd)
 	case 'C':
+		//  TODO: States its reserved for later use, I imagine nothing implements it
+		p.handleUnknownCmd(line)
 	case 'L':
-	case 'R':
-		switch p.cmdType(line) {
-		case 'D', 'E':
-		case 'S', 'T':
-		case 'L', 'M':
-		case 'A':
-			// Response for .R request, or a .W request
-		default:
-			p.handleUnknownCmd(line)
+		handler, ok := p.commandHandlers[DotL]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotL),
+			)
+			return
 		}
-	case 'W':
-		switch p.cmdType(line) {
-		case 'D', 'E':
-		case 'S', 'T':
-		case 'L', 'M':
-		default:
-			p.handleUnknownCmd(line)
+		cmd, err := DecodeDotL(line[2:])
+		if err != nil {
+			p.log.Error(
+				".I command received, but invalid arguments",
+				"Cmd",
+				string(line),
+				"Error",
+				err.Error(),
+			)
+			dotE := ErrResp{}
+			err = p.sendLine([]byte(dotE.Error()))
+			if err != nil {
+				p.log.Error("Unable to send response")
+				p.handleShutdown(err.Error())
+				return
+			}
+			return
+		}
+		handler(p, cmd)
 
-		}
+	case 'R':
+	case 'W':
 	case '?':
 		// Embedded control system only
+		p.handleUnknownCmd(line)
 	case '!':
 		// Embedded control system only
+		p.handleUnknownCmd(line)
 	case 'Q':
-		switch p.cmdType(line) {
-		case 'C':
-		case 'R':
-		case 'S':
-		case 'F':
-		case 'D':
-		case 'L':
-		default:
-			p.handleUnknownCmd(line)
-		}
 	case 'A':
 		// General response
 		p.handleResponse(line)
@@ -435,15 +471,6 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	default:
 		p.handleUnknownCmd(line)
 	}
-}
-
-// cmdType is a helper method to get the 'type' of the dot command, for
-// example the type of .BL would be 'L'
-func (p *QuartzProtocol) cmdType(line []byte) byte {
-	if len(line) > 2 {
-		return line[2]
-	}
-	return 0
 }
 
 // sendLine is the low level function to send a single line to a remote peer
