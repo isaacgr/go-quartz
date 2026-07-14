@@ -33,19 +33,86 @@ func TestDecodeDotE(t *testing.T) {
 
 func TestDecodeDotA(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   []byte
-		wantErr bool
+		name     string
+		input    []byte
+		wantResp []DotAResp
+		wantErr  bool
 	}{
-		{"valid", []byte("A"), false},
-		{"extra info", []byte("A - Invalid route"), true}, // TODO: This may change
-		{"starts with another letter", []byte("AA"), true},
-		{"empty", []byte(""), true},
-		{"lowercase", []byte("a"), true},
+		{
+			"valid level,dst,src",
+			[]byte("V1,1"),
+			[]DotAResp{
+				DotAResp{
+					Level: "V",
+					Src:   1,
+					Dst:   1,
+				},
+			},
+			false,
+		},
+		{
+			"valid multi level,dst,src",
+			[]byte("V1,1A1,1B1,2"),
+			[]DotAResp{
+				DotAResp{
+					Level: "V",
+					Src:   1,
+					Dst:   1,
+				},
+				DotAResp{
+					Level: "A",
+					Src:   1,
+					Dst:   1,
+				},
+				DotAResp{
+					Level: "B",
+					Src:   2,
+					Dst:   1,
+				},
+			},
+			false,
+		},
+		{
+			"invalid level,dst",
+			[]byte("V1,"),
+			nil,
+			true,
+		},
+		{
+			"invalid multiple levels",
+			[]byte("VABC1,1"),
+			nil,
+			true,
+		},
+		{
+			"extra info",
+			// TODO: This may change
+			[]byte("A - Invalid route"),
+			nil,
+			true,
+		},
+		{
+			"starts with another letter",
+			[]byte("AA"),
+			nil,
+			true,
+		},
+		{
+			"empty",
+			[]byte(""),
+			nil,
+			true,
+		},
+		{
+			"lowercase",
+			[]byte("a"),
+			nil,
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeDotA(tt.input)
+			resp, err := DecodeDotA(tt.input)
 			if err != nil {
 				if !tt.wantErr {
 					t.Errorf(
@@ -54,6 +121,39 @@ func TestDecodeDotA(t *testing.T) {
 						err,
 						tt.wantErr,
 					)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf(
+						"DecodeDotA(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				} else {
+					for i, r := range tt.wantResp {
+						if r.Level != resp[i].Level {
+							t.Errorf(
+								"Incorrect level received. got=%v, want=%v",
+								resp,
+								r,
+							)
+						}
+						if r.Dst != resp[i].Dst {
+							t.Errorf(
+								"Incorrect dst received. got=%v, want=%v",
+								resp,
+								r,
+							)
+						}
+						if r.Src != resp[i].Src {
+							t.Errorf(
+								"Incorrect src received. got=%v, want=%v",
+								resp,
+								r,
+							)
+						}
+					}
 				}
 			}
 		})
@@ -470,6 +570,12 @@ func TestDecodeDotL(t *testing.T) {
 		},
 		{
 			"invalid V1,-1",
+			[]byte("V1,-1"),
+			nil,
+			true,
+		},
+		{
+			"invalid V1,",
 			[]byte("V1,-1"),
 			nil,
 			true,

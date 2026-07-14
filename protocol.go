@@ -473,6 +473,15 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	}
 }
 
+// cmdType is a helper method to get the 'type' of the dot command, for
+// example the type of .BL would be 'L'
+func (p *QuartzProtocol) cmdType(line []byte) byte {
+	if len(line) > 2 {
+		return line[2]
+	}
+	return 0
+}
+
 // sendLine is the low level function to send a single line to a remote peer
 // the line is queued in the transports write queue
 func (p *QuartzProtocol) sendLine(line []byte) error {
@@ -497,14 +506,18 @@ func (p *QuartzProtocol) handleResponse(line []byte) {
 		)
 		return
 	}
-	cmd, err := DecodeDotA(line[1:])
-	if err != nil {
-		p.log.Error(
-			".A received, but invalid structure",
-			"Line",
-			string(line),
-		)
-		return
+	var err error
+	cmd := []DotAResp{}
+	if len(line) > 2 {
+		cmd, err = DecodeDotA(line[2:])
+		if err != nil {
+			p.log.Error(
+				".A received, but invalid structure",
+				"Line",
+				string(line),
+			)
+			return
+		}
 	}
 	// TODO: This blocks the go routine
 	handler(p, cmd)

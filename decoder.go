@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var dotARegexp *regexp.Regexp = regexp.MustCompile("^[A]$")
+var dotARegexp *regexp.Regexp = regexp.MustCompile(`([A-Z]+)([0-9]+),([0-9]+)`)
 var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
 var dotSRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
 var dotMRegexp *regexp.Regexp = regexp.MustCompile("([A-Za-z]+)?([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*),([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*)")
@@ -33,7 +33,11 @@ func (e *DecodeError) Error() string {
 	)
 }
 
-type DotAResp struct{}
+type DotAResp struct {
+	Level string
+	Dst   int
+	Src   int
+}
 type DotEResp struct{}
 type SetXptCmd struct {
 	Levels []string
@@ -58,8 +62,8 @@ type DotLCmd struct {
 	Src   *int
 }
 
-func DecodeDotA(line []byte) (*DotAResp, error) {
-	// .A
+func DecodeDotA(line []byte) ([]DotAResp, error) {
+	// .AV1,1
 	ok := dotARegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
@@ -68,7 +72,49 @@ func DecodeDotA(line []byte) (*DotAResp, error) {
 			Msg:  "Invalid format",
 		}
 	}
-	return &DotAResp{}, nil
+	resp := []DotAResp{}
+	matches := dotARegexp.FindAllStringSubmatch(string(line), -1)
+	if matches != nil {
+		for _, match := range matches {
+			if len(match[1]) > 1 {
+				return nil, &DecodeError{
+					Cmd:  ".A",
+					Line: string(line),
+					Msg:  "Too many levels in response message",
+				}
+
+			}
+			level := match[1]
+
+			dst, err := strconv.Atoi(match[2])
+			if err != nil {
+				return nil, &DecodeError{
+					Cmd:  ".A",
+					Line: string(line),
+					Msg:  "Cannot infer dst index",
+				}
+			}
+			src, err := strconv.Atoi(match[3])
+			if err != nil {
+				return nil, &DecodeError{
+					Cmd:  ".A",
+					Line: string(line),
+					Msg:  "Cannot infer src index",
+				}
+			}
+			resp = append(resp, DotAResp{
+				Level: level,
+				Src:   src,
+				Dst:   dst,
+			})
+		}
+		return resp, nil
+	}
+	return nil, &DecodeError{
+		Cmd:  ".A",
+		Line: string(line),
+		Msg:  "Invalid response format",
+	}
 }
 
 func DecodeDotE(line []byte) (*DotEResp, error) {
