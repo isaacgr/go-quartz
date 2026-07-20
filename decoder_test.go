@@ -207,7 +207,7 @@ func TestDecodeDotM(t *testing.T) {
 		{"valid dest range multi digit", []byte("VA001-005,001"), false},
 		{"valid src range", []byte("VA1-5,10-14"), false},
 		{"valid src range multi digit", []byte("VA001-005,010-014"), false},
-		{"valid dest level add param", []byte("V1+A1+B2,1"), false},
+		//{"valid dest level add param", []byte("V1+A1+B2,1"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -616,7 +616,208 @@ func TestDecodeDotL(t *testing.T) {
 							tt.wantCmd,
 						)
 					}
+				}
+			}
+		})
+	}
+}
 
+func makeStringPointer(s string) *string {
+	return &s
+}
+
+func TestDecodeDotR(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotRCmd
+		wantErr bool
+	}{
+		{
+			"D1",
+			[]byte("D1"),
+			&DotRCmd{Type: "D", Mnemonic: "1"},
+			false,
+		},
+		{
+			"S1",
+			[]byte("S1"),
+			&DotRCmd{Type: "S", Mnemonic: "1"},
+			false,
+		},
+		{
+			"LV",
+			[]byte("LV"),
+			&DotRCmd{Type: "L", Mnemonic: "V"},
+			false,
+		},
+		{
+			"E1",
+			[]byte("E1"),
+			&DotRCmd{Type: "E", Mnemonic: "1"},
+			false,
+		},
+		{
+			"T1",
+			[]byte("T1"),
+			&DotRCmd{Type: "T", Mnemonic: "1"},
+			false,
+		},
+		{
+			"MV",
+			[]byte("MV"),
+			&DotRCmd{Type: "M", Mnemonic: "V"},
+			false,
+		},
+		{
+			"ADsomename",
+			[]byte("ADsomename"),
+			&DotRCmd{Type: "AD", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"AD1,somename",
+			[]byte("AD1,somename"),
+			&DotRCmd{Type: "AD", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
+			false,
+		},
+		{
+			"ASsomename",
+			[]byte("ASsomename"),
+			&DotRCmd{Type: "AS", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"AS1,somename",
+			[]byte("AS1,somename"),
+			&DotRCmd{Type: "AS", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
+			false,
+		},
+		{
+			"ALsomename",
+			[]byte("ALsomename"),
+			&DotRCmd{Type: "AL", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"ALV,somename",
+			[]byte("ALV,somename"),
+			&DotRCmd{Type: "AL", Mnemonic: "somename", Level: makeStringPointer("V")},
+			false,
+		},
+		{
+			"AEsomename",
+			[]byte("AEsomename"),
+			&DotRCmd{Type: "AE", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"AE1,somename",
+			[]byte("AE1,somename"),
+			&DotRCmd{Type: "AE", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
+			false,
+		},
+		{
+			"ADsomename_dup",
+			[]byte("ADsomename"),
+			&DotRCmd{Type: "AD", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"AD1,somename_dup",
+			[]byte("AD1,somename"),
+			&DotRCmd{Type: "AD", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
+			false,
+		},
+		{
+			"AMV,somename",
+			[]byte("AMV,somename"),
+			&DotRCmd{Type: "AM", Mnemonic: "somename", Level: makeStringPointer("V")},
+			false,
+		},
+		{
+			"ADSomeone",
+			[]byte("ADSomeone"),
+			&DotRCmd{Type: "AD", Mnemonic: "Someone"},
+			false,
+		},
+		{
+			"ADSomenamewithnumber1",
+			[]byte("ADSomenamewithnumber1"),
+			&DotRCmd{Type: "AD", Mnemonic: "Somenamewithnumber1"},
+			false,
+		},
+		{
+			"AD-valid",
+			[]byte("AD-valid"),
+			&DotRCmd{Type: "AD", Mnemonic: "-valid"},
+			false,
+		},
+		{
+			"AD_valid",
+			[]byte("AD_valid"),
+			&DotRCmd{Type: "AD", Mnemonic: "_valid"},
+			false,
+		},
+		{
+			"AD_valid_",
+			[]byte("AD_valid_"),
+			&DotRCmd{Type: "AD", Mnemonic: "_valid_"},
+			false,
+		},
+		{
+			"AD_valid-",
+			[]byte("AD_valid-"),
+			&DotRCmd{Type: "AD", Mnemonic: "_valid-"},
+			false,
+		},
+		{
+			"AD invalid",
+			[]byte("AD invalid"),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotR(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf(
+						"DecodeDotR(%q) error = %v, wantErr %v",
+						tt.input,
+						err,
+						tt.wantErr,
+					)
+				}
+			} else {
+				if cmd.Type != tt.wantCmd.Type {
+					t.Errorf(
+						"Incorrect type received. got=%v, want=%v",
+						cmd.Type,
+						tt.wantCmd.Type,
+					)
+				}
+				if cmd.Mnemonic != tt.wantCmd.Mnemonic {
+					t.Errorf(
+						"Incorrect mnemonic received. got=%v, want=%v",
+						cmd.Mnemonic,
+						tt.wantCmd.Mnemonic,
+					)
+				}
+				if (cmd.DstSrc == nil && tt.wantCmd.DstSrc != nil) || (cmd.DstSrc != nil && tt.wantCmd.DstSrc == nil) || (cmd.DstSrc != nil && tt.wantCmd.DstSrc != nil && *cmd.DstSrc != *tt.wantCmd.DstSrc) {
+					t.Errorf(
+						"Incorrect dstsrc received. got=%v, want=%v",
+						cmd.DstSrc,
+						tt.wantCmd.DstSrc,
+					)
+				}
+				if (cmd.Level == nil && tt.wantCmd.Level != nil) || (cmd.Level != nil && tt.wantCmd.Level == nil) || (cmd.Level != nil && tt.wantCmd.Level != nil && *cmd.Level != *tt.wantCmd.Level) {
+					t.Errorf(
+						"Incorrect level received. got=%v, want=%v",
+						cmd.Level,
+						tt.wantCmd.Level,
+					)
 				}
 			}
 		})

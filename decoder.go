@@ -17,6 +17,7 @@ var dotBRegexp *regexp.Regexp = regexp.MustCompile("^([LUIA])([0-9]{1,})(,[0-9]{
 var dotFRegexp *regexp.Regexp = regexp.MustCompile("^[0-9]{1,3}$")
 var dotIRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,})$")
 var dotLRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,},-?)([0-9]{1,})?$")
+var dotRRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETMA]{1,2})([0-9A-Z],)?([a-zA-Z0-9\-\_]{0,})$`)
 
 type DecodeError struct {
 	Cmd  string
@@ -60,6 +61,12 @@ type DotLCmd struct {
 	Level string
 	Dst   int
 	Src   *int
+}
+type DotRCmd struct {
+	Mnemonic string
+	Type     string
+	DstSrc   *int
+	Level    *string
 }
 
 func DecodeDotA(line []byte) ([]DotAResp, error) {
@@ -198,6 +205,7 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 		}
 		matches := dotMPlusRegexp.FindAllStringSubmatch(string(line), -1)
 		if matches != nil {
+			// TODO
 		}
 	} else {
 		// It did compile using the other syntax
@@ -569,4 +577,57 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
+}
+
+func DecodeDotR(line []byte) (*DotRCmd, error) {
+	// .RD1/.RE1, RS1/.RT1, .RLV/.RMV, .RA[D/S/L/E/T/M]...
+	ok := dotRRegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{
+			Cmd:  ".R",
+			Line: string(line),
+			Msg:  "Invalid format",
+		}
+	}
+	matches := dotRRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		cmdType := matches[1]
+		destSrcLevel := matches[2]
+		mnemonic := matches[3]
+
+		cmd := &DotRCmd{
+			Mnemonic: mnemonic,
+			Type:     cmdType,
+		}
+
+		if destSrcLevel == "" {
+			// not the comma syntax
+			return cmd, nil
+		} else {
+			dsl := strings.Split(destSrcLevel, ",")
+			if len(dsl) == 1 {
+				return nil, &DecodeError{
+					Cmd:  ".R",
+					Line: string(line),
+					Msg:  "Invalid dest/src/level in response",
+				}
+			}
+			dstsrc, err := strconv.Atoi(dsl[0])
+			if err != nil {
+				// would be a level response
+				level := dsl[0]
+				cmd.Level = &level
+			} else {
+				cmd.DstSrc = &dstsrc
+			}
+		}
+		return cmd, nil
+	}
+
+	return nil, &DecodeError{
+		Cmd:  ".R",
+		Line: string(line),
+		Msg:  "Invalid request",
+	}
+
 }

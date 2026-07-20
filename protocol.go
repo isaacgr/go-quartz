@@ -26,6 +26,7 @@ const (
 	DotF Cmd = 'F'
 	DotI Cmd = 'I'
 	DotL Cmd = 'L'
+	DotR Cmd = 'R'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -277,20 +278,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotS(line[2:])
 		if err != nil {
-			p.log.Error(
-				".S command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
@@ -312,20 +300,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotM(line[2:])
 		if err != nil {
-			p.log.Error(
-				".M command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
@@ -341,20 +316,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotB(line[2:])
 		if err != nil {
-			p.log.Error(
-				".B command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
@@ -370,20 +332,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotF(line[2:])
 		if err != nil {
-			p.log.Error(
-				".F command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
@@ -399,20 +348,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotI(line[2:])
 		if err != nil {
-			p.log.Error(
-				".I command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
@@ -431,25 +367,26 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		cmd, err := DecodeDotL(line[2:])
 		if err != nil {
-			p.log.Error(
-				".I command received, but invalid arguments",
-				"Cmd",
-				string(line),
-				"Error",
-				err.Error(),
-			)
-			dotE := ErrResp{}
-			err = p.sendLine([]byte(dotE.Error()))
-			if err != nil {
-				p.log.Error("Unable to send response")
-				p.handleShutdown(err.Error())
-				return
-			}
+			p.handleError(err)
 			return
 		}
 		handler(p, cmd)
-
 	case 'R':
+		handler, ok := p.commandHandlers[DotR]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotR),
+			)
+			return
+		}
+		cmd, err := DecodeDotR(line[2:])
+		if err != nil {
+			p.handleError(err)
+			return
+		}
+		handler(p, cmd)
 	case 'W':
 	case '?':
 		// Embedded control system only
@@ -480,6 +417,20 @@ func (p *QuartzProtocol) cmdType(line []byte) byte {
 		return line[2]
 	}
 	return 0
+}
+
+func (p *QuartzProtocol) handleError(err error) {
+	p.log.Error(
+		"Got error",
+		"Error",
+		err.Error(),
+	)
+	dotE := ErrResp{}
+	err = p.sendLine([]byte(dotE.Error()))
+	if err != nil {
+		p.log.Error("Unable to send response")
+		p.handleShutdown(err.Error())
+	}
 }
 
 // sendLine is the low level function to send a single line to a remote peer
