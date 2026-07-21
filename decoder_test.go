@@ -742,40 +742,10 @@ func TestDecodeDotR(t *testing.T) {
 			false,
 		},
 		{
-			"ADSomenamewithnumber1",
-			[]byte("ADSomenamewithnumber1"),
-			&DotRCmd{Type: "AD", Mnemonic: "Somenamewithnumber1"},
+			"AD !@#$%%^&*()?.[';/.,?><;'",
+			[]byte("AD !@#$%%^&*()?.[';/.,?><;'"),
+			&DotRCmd{Type: "AD", Mnemonic: " !@#$%%^&*()?.[';/.,?><;'"},
 			false,
-		},
-		{
-			"AD-valid",
-			[]byte("AD-valid"),
-			&DotRCmd{Type: "AD", Mnemonic: "-valid"},
-			false,
-		},
-		{
-			"AD_valid",
-			[]byte("AD_valid"),
-			&DotRCmd{Type: "AD", Mnemonic: "_valid"},
-			false,
-		},
-		{
-			"AD_valid_",
-			[]byte("AD_valid_"),
-			&DotRCmd{Type: "AD", Mnemonic: "_valid_"},
-			false,
-		},
-		{
-			"AD_valid-",
-			[]byte("AD_valid-"),
-			&DotRCmd{Type: "AD", Mnemonic: "_valid-"},
-			false,
-		},
-		{
-			"AD invalid",
-			[]byte("AD invalid"),
-			nil,
-			true,
 		},
 	}
 	for _, tt := range tests {

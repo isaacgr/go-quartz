@@ -17,7 +17,7 @@ var dotBRegexp *regexp.Regexp = regexp.MustCompile("^([LUIA])([0-9]{1,})(,[0-9]{
 var dotFRegexp *regexp.Regexp = regexp.MustCompile("^[0-9]{1,3}$")
 var dotIRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,})$")
 var dotLRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,},-?)([0-9]{1,})?$")
-var dotRRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETMA]{1,2})([0-9A-Z],)?([a-zA-Z0-9\-\_]{0,})$`)
+var dotRRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETMA]{1,2})([0-9A-Z],)?(.*)$`)
 
 type DecodeError struct {
 	Cmd  string
