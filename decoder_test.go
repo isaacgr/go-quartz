@@ -1,6 +1,9 @@
 package goquartz
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestDecodeDotE(t *testing.T) {
 	tests := []struct {
@@ -226,12 +229,7 @@ func TestDecodeDotM(t *testing.T) {
 	}
 }
 
-func makeIntPointer(v int) *int {
-	return &v
-}
-
 func TestDecodeDotB(t *testing.T) {
-
 	tests := []struct {
 		name    string
 		input   []byte
@@ -277,7 +275,7 @@ func TestDecodeDotB(t *testing.T) {
 			&DstLockCmd{
 				Dst:    1,
 				Type:   "A",
-				Locked: makeIntPointer(0),
+				Locked: 0,
 			},
 			false,
 		},
@@ -287,7 +285,7 @@ func TestDecodeDotB(t *testing.T) {
 			&DstLockCmd{
 				Dst:    1,
 				Type:   "A",
-				Locked: makeIntPointer(1),
+				Locked: 1,
 			},
 			false,
 		},
@@ -297,7 +295,7 @@ func TestDecodeDotB(t *testing.T) {
 			&DstLockCmd{
 				Dst:    1,
 				Type:   "A",
-				Locked: makeIntPointer(255),
+				Locked: 255,
 			},
 			false,
 		},
@@ -313,36 +311,13 @@ func TestDecodeDotB(t *testing.T) {
 			cmd, err := DecodeDotB(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf(
-						"DecodeDotB(%q) error = %v, wantErr %v",
-						tt.input,
-						err,
-						tt.wantErr,
-					)
+					t.Errorf("DecodeDotB(%q) unexpected error = %v", tt.input, err)
 				}
 			} else {
-				if cmd.Dst != tt.wantCmd.Dst {
-					t.Errorf(
-						"Incorrect dst received. got=%v, want=%v",
-						cmd,
-						tt.wantCmd,
-					)
-				}
-				if cmd.Locked != nil && tt.wantCmd != nil {
-					if *cmd.Locked != *tt.wantCmd.Locked {
-						t.Errorf(
-							"Incorrect lock state received. got=%v, want=%v",
-							cmd,
-							tt.wantCmd,
-						)
-					}
-				}
-				if cmd.Type != tt.wantCmd.Type {
-					t.Errorf(
-						"Incorrect lock type received. got=%v, want=%v",
-						cmd,
-						tt.wantCmd,
-					)
+				if tt.wantErr {
+					t.Errorf("DecodeDotB(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotB(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
 				}
 			}
 		})
@@ -527,7 +502,6 @@ func TestDecodeDotI(t *testing.T) {
 }
 
 func TestDecodeDotL(t *testing.T) {
-
 	tests := []struct {
 		name    string
 		input   []byte
@@ -558,7 +532,7 @@ func TestDecodeDotL(t *testing.T) {
 			&DotLCmd{
 				Level: "V",
 				Dst:   1,
-				Src:   makeIntPointer(1),
+				Src:   1,
 			},
 			false,
 		},
@@ -586,44 +560,17 @@ func TestDecodeDotL(t *testing.T) {
 			cmd, err := DecodeDotL(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf(
-						"DecodeDotL(%q) error = %v, wantErr %v",
-						tt.input,
-						err,
-						tt.wantErr,
-					)
+					t.Errorf("DecodeDotL(%q) unexpected error = %v", tt.input, err)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf(
-						"DecodeDotL(%q) error = %v, wantErr %v",
-						tt.input,
-						err,
-						tt.wantErr,
-					)
-				} else {
-					if cmd.Level != tt.wantCmd.Level {
-						t.Errorf(
-							"Incorrect level received. got=%v, want=%v",
-							cmd,
-							tt.wantCmd,
-						)
-					}
-					if cmd.Dst != tt.wantCmd.Dst {
-						t.Errorf(
-							"Incorrect dst received. got=%v, want=%v",
-							cmd,
-							tt.wantCmd,
-						)
-					}
+					t.Errorf("DecodeDotL(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotL(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
 				}
 			}
 		})
 	}
-}
-
-func makeStringPointer(s string) *string {
-	return &s
 }
 
 func TestDecodeDotR(t *testing.T) {
@@ -634,118 +581,127 @@ func TestDecodeDotR(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			"D1",
+			"Read destination index",
 			[]byte("D1"),
-			&DotRCmd{Type: "D", Mnemonic: "1"},
+			&DotRCmd{Type: "D", DstSrc: 1},
 			false,
 		},
 		{
-			"S1",
+			"Read source index",
 			[]byte("S1"),
-			&DotRCmd{Type: "S", Mnemonic: "1"},
+			&DotRCmd{Type: "S", DstSrc: 1},
 			false,
 		},
 		{
-			"LV",
+			"Read level",
 			[]byte("LV"),
-			&DotRCmd{Type: "L", Mnemonic: "V"},
+			&DotRCmd{Type: "L", Level: "V"},
 			false,
 		},
 		{
-			"E1",
+			"Read protect dest",
 			[]byte("E1"),
-			&DotRCmd{Type: "E", Mnemonic: "1"},
+			&DotRCmd{Type: "E", DstSrc: 1},
 			false,
 		},
 		{
-			"T1",
+			"Read protect src",
 			[]byte("T1"),
-			&DotRCmd{Type: "T", Mnemonic: "1"},
+			&DotRCmd{Type: "T", DstSrc: 1},
 			false,
 		},
 		{
-			"MV",
+			"Read matrix",
 			[]byte("MV"),
-			&DotRCmd{Type: "M", Mnemonic: "V"},
+			&DotRCmd{Type: "M", Level: "V"},
 			false,
 		},
 		{
-			"ADsomename",
+			"Query destination name",
 			[]byte("ADsomename"),
 			&DotRCmd{Type: "AD", Mnemonic: "somename"},
 			false,
 		},
 		{
-			"AD1,somename",
-			[]byte("AD1,somename"),
-			&DotRCmd{Type: "AD", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
-			false,
-		},
-		{
-			"ASsomename",
+			"Query source name",
 			[]byte("ASsomename"),
 			&DotRCmd{Type: "AS", Mnemonic: "somename"},
 			false,
 		},
 		{
-			"AS1,somename",
-			[]byte("AS1,somename"),
-			&DotRCmd{Type: "AS", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
-			false,
-		},
-		{
-			"ALsomename",
+			"Query level name",
 			[]byte("ALsomename"),
 			&DotRCmd{Type: "AL", Mnemonic: "somename"},
 			false,
 		},
 		{
-			"ALV,somename",
-			[]byte("ALV,somename"),
-			&DotRCmd{Type: "AL", Mnemonic: "somename", Level: makeStringPointer("V")},
-			false,
-		},
-		{
-			"AEsomename",
+			"Query protect dest name",
 			[]byte("AEsomename"),
 			&DotRCmd{Type: "AE", Mnemonic: "somename"},
 			false,
 		},
+
 		{
-			"AE1,somename",
-			[]byte("AE1,somename"),
-			&DotRCmd{Type: "AE", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
-			false,
-		},
-		{
-			"ADsomename_dup",
-			[]byte("ADsomename"),
-			&DotRCmd{Type: "AD", Mnemonic: "somename"},
-			false,
-		},
-		{
-			"AD1,somename_dup",
+			"Associate destination index with name",
 			[]byte("AD1,somename"),
-			&DotRCmd{Type: "AD", Mnemonic: "somename", DstSrc: makeIntPointer(1)},
+			&DotRCmd{Type: "AD", DstSrc: 1, Mnemonic: "somename"},
 			false,
 		},
 		{
-			"AMV,somename",
+			"Associate source index with name",
+			[]byte("AS1,somename"),
+			&DotRCmd{Type: "AS", DstSrc: 1, Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Associate level name with name",
+			[]byte("ALV,somename"),
+			&DotRCmd{Type: "AL", Level: "V", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Associate protect dest index with name",
+			[]byte("AE1,somename"),
+			&DotRCmd{Type: "AE", DstSrc: 1, Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Associate matrix name with name",
 			[]byte("AMV,somename"),
-			&DotRCmd{Type: "AM", Mnemonic: "somename", Level: makeStringPointer("V")},
+			&DotRCmd{Type: "AM", Level: "V", Mnemonic: "somename"},
 			false,
 		},
+
 		{
-			"ADSomeone",
+			"Mnemonic with mixed casing",
 			[]byte("ADSomeone"),
 			&DotRCmd{Type: "AD", Mnemonic: "Someone"},
 			false,
 		},
 		{
-			"AD !@#$%%^&*()?.[';/.,?><;'",
+			"Mnemonic with special characters",
 			[]byte("AD !@#$%%^&*()?.[';/.,?><;'"),
 			&DotRCmd{Type: "AD", Mnemonic: " !@#$%%^&*()?.[';/.,?><;'"},
 			false,
+		},
+
+		{
+			"Invalid prefix",
+			[]byte("XZ1"),
+			nil,
+			true,
+		},
+		{
+			"Empty input",
+			[]byte(""),
+			nil,
+			true,
+		},
+		{
+			"Invalid empty index",
+			[]byte("D0"),
+			nil,
+			true,
 		},
 	}
 	for _, tt := range tests {
@@ -753,41 +709,219 @@ func TestDecodeDotR(t *testing.T) {
 			cmd, err := DecodeDotR(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf(
-						"DecodeDotR(%q) error = %v, wantErr %v",
-						tt.input,
-						err,
-						tt.wantErr,
-					)
+					t.Errorf("DecodeDotR(%q) unexpected error = %v", tt.input, err)
 				}
 			} else {
-				if cmd.Type != tt.wantCmd.Type {
-					t.Errorf(
-						"Incorrect type received. got=%v, want=%v",
-						cmd.Type,
-						tt.wantCmd.Type,
-					)
+				if tt.wantErr {
+					t.Errorf("DecodeDotR(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotR(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
 				}
-				if cmd.Mnemonic != tt.wantCmd.Mnemonic {
-					t.Errorf(
-						"Incorrect mnemonic received. got=%v, want=%v",
-						cmd.Mnemonic,
-						tt.wantCmd.Mnemonic,
-					)
+			}
+		})
+	}
+}
+
+func TestDecodeDotW(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotWCmd
+		wantErr bool
+	}{
+		{
+			"Write destination mnemonic",
+			[]byte("D1,somename"),
+			&DotWCmd{Type: "D", DstSrc: 1, Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Write source mnemonic",
+			[]byte("S1,somename"),
+			&DotWCmd{Type: "S", DstSrc: 1, Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Write level mnemonic",
+			[]byte("LV,somename"),
+			&DotWCmd{Type: "L", Level: "V", Mnemonic: "somename"},
+			false,
+		},
+		{
+			"Write empty mnemonic to clear",
+			[]byte("D1,"),
+			&DotWCmd{Type: "D", DstSrc: 1, Mnemonic: ""},
+			false,
+		},
+		{
+			"Missing comma and mnemonic",
+			[]byte("D1"),
+			nil,
+			true,
+		},
+		{
+			"Missing index/level",
+			[]byte("Dsomename"),
+			nil,
+			true,
+		},
+		{
+			"Invalid prefix",
+			[]byte("X1,somename"),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotW(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf("DecodeDotW(%q) unexpected error = %v", tt.input, err)
 				}
-				if (cmd.DstSrc == nil && tt.wantCmd.DstSrc != nil) || (cmd.DstSrc != nil && tt.wantCmd.DstSrc == nil) || (cmd.DstSrc != nil && tt.wantCmd.DstSrc != nil && *cmd.DstSrc != *tt.wantCmd.DstSrc) {
-					t.Errorf(
-						"Incorrect dstsrc received. got=%v, want=%v",
-						cmd.DstSrc,
-						tt.wantCmd.DstSrc,
-					)
+			} else {
+				if tt.wantErr {
+					t.Errorf("DecodeDotW(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotW(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
 				}
-				if (cmd.Level == nil && tt.wantCmd.Level != nil) || (cmd.Level != nil && tt.wantCmd.Level == nil) || (cmd.Level != nil && tt.wantCmd.Level != nil && *cmd.Level != *tt.wantCmd.Level) {
-					t.Errorf(
-						"Incorrect level received. got=%v, want=%v",
-						cmd.Level,
-						tt.wantCmd.Level,
-					)
+			}
+		})
+	}
+}
+
+func TestDecodeDotQ(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotQCmd
+		wantErr bool
+	}{
+		{
+			"Create salvo",
+			[]byte("C1"),
+			&DotQCmd{Type: "C", Salvo: 1},
+			false,
+		},
+		{
+			"Empty salvo",
+			[]byte("R1"),
+			&DotQCmd{Type: "R", Salvo: 1},
+			false,
+		},
+		{
+			"Destroy salvo",
+			[]byte("D1"),
+			&DotQCmd{Type: "D", Salvo: 1},
+			false,
+		},
+		{
+			"List salvo",
+			[]byte("L1"),
+			&DotQCmd{Type: "L", Salvo: 1},
+			false,
+		},
+		{
+			"List salvo response with elements",
+			[]byte("L1,12"),
+			&DotQCmd{Type: "L", Salvo: 1, Count: 12, Response: true},
+			false,
+		},
+		{
+			"List salvo response with zero elements",
+			[]byte("L0,0"),
+			&DotQCmd{Type: "L", Salvo: 0, Count: 0, Response: true},
+			false,
+		},
+		{
+			"Fire salvo time default",
+			[]byte("F1"),
+			&DotQCmd{Type: "F", Salvo: 1},
+			false,
+		},
+		{
+			"Load salvo",
+			[]byte("S1V1,2"),
+			&DotQCmd{Type: "S", Salvo: 1, Level: "V", Dest: 1, Src: 2},
+			false,
+		},
+		{
+			"Fire salvo with timestamp",
+			[]byte("F1T1:12:34:56:00"),
+			&DotQCmd{
+				Type:  "F",
+				Salvo: 1,
+				FTime: &DotQFTime{
+					Hours:   12,
+					Minutes: 34,
+					Seconds: 56,
+					Frames:  0,
+				},
+			},
+			false,
+		},
+		// Invalid cases
+		{
+			"Missing salvo number",
+			[]byte("C"),
+			nil,
+			true,
+		},
+		{
+			"Negative salvo number",
+			[]byte("C-1"),
+			nil,
+			true,
+		},
+		{
+			"S command missing level/dest/src",
+			[]byte("S1"),
+			nil,
+			true,
+		},
+		{
+			"S command missing src",
+			[]byte("S1V1,"),
+			nil,
+			true,
+		},
+		{
+			"S command missing level",
+			[]byte("S11,2"),
+			nil,
+			true,
+		},
+		{
+			"F command invalid timestamp format",
+			[]byte("F1T1:12:34:56"),
+			nil,
+			true,
+		},
+		{
+			"Invalid command prefix",
+			[]byte("X1"),
+			nil,
+			true,
+		},
+		{
+			"Empty input",
+			[]byte(""),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotQ(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf("DecodeDotQ(%q) unexpected error = %v", tt.input, err)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf("DecodeDotQ(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotQ(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
 				}
 			}
 		})

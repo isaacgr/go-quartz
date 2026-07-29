@@ -27,6 +27,8 @@ const (
 	DotI Cmd = 'I'
 	DotL Cmd = 'L'
 	DotR Cmd = 'R'
+	DotW Cmd = 'W'
+	DotQ Cmd = 'Q'
 )
 
 type CommandHandler func(p *QuartzProtocol, cmd any)
@@ -388,6 +390,21 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case 'W':
+		handler, ok := p.commandHandlers[DotW]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotW),
+			)
+			return
+		}
+		cmd, err := DecodeDotW(line[2:])
+		if err != nil {
+			p.handleError(err)
+			return
+		}
+		handler(p, cmd)
 	case '?':
 		// Embedded control system only
 		p.handleUnknownCmd(line)
@@ -395,6 +412,21 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		// Embedded control system only
 		p.handleUnknownCmd(line)
 	case 'Q':
+		handler, ok := p.commandHandlers[DotQ]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotQ),
+			)
+			return
+		}
+		cmd, err := DecodeDotQ(line[2:])
+		if err != nil {
+			p.handleError(err)
+			return
+		}
+		handler(p, cmd)
 	case 'A':
 		// General response
 		p.handleResponse(line)
@@ -447,30 +479,22 @@ func (p *QuartzProtocol) sendLine(line []byte) error {
 }
 
 func (p *QuartzProtocol) handleUpdate(line []byte) {}
+
 func (p *QuartzProtocol) handleResponse(line []byte) {
 	handler, ok := p.commandHandlers[DotA]
 	if !ok {
-		p.log.Warn(
+		p.log.Error(
 			"No matching handler found for command",
 			"Cmd",
 			string(DotA),
 		)
 		return
 	}
-	var err error
-	cmd := []DotAResp{}
-	if len(line) > 2 {
-		cmd, err = DecodeDotA(line[2:])
-		if err != nil {
-			p.log.Error(
-				".A received, but invalid structure",
-				"Line",
-				string(line),
-			)
-			return
-		}
+	cmd, err := DecodeDotA(line[2:])
+	if err != nil {
+		p.handleError(err)
+		return
 	}
-	// TODO: This blocks the go routine
 	handler(p, cmd)
 }
 
@@ -498,6 +522,7 @@ func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 }
 
 func (p *QuartzProtocol) handleNullCmd(line []byte) {}
+
 func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
 	p.log.Warn(
 		"Received unknown command",

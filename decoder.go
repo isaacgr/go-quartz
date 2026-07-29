@@ -18,6 +18,8 @@ var dotFRegexp *regexp.Regexp = regexp.MustCompile("^[0-9]{1,3}$")
 var dotIRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,})$")
 var dotLRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,},-?)([0-9]{1,})?$")
 var dotRRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETMA]{1,2})([0-9A-Z],)?(.*)$`)
+var dotWRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETM]{1,2})([0-9A-Z]),(.*)$`)
+var dotQRegexp *regexp.Regexp = regexp.MustCompile(`^([CRFSDL])([0-9]{1,})(?:(?:([A-Z]{1})([0-9]{1,}),([0-9]{1,}))|(T1\:[0-9]{2}\:[0-9]{2}\:[0-9]{2}\:[0-9]{2})|,([0-9]{1,}))?$`)
 
 type DecodeError struct {
 	Cmd  string
@@ -48,7 +50,7 @@ type SetXptCmd struct {
 type DstLockCmd struct {
 	Dst    int
 	Type   string
-	Locked *int
+	Locked int
 }
 type DotFCmd struct {
 	Salvo int
@@ -60,13 +62,35 @@ type DotICmd struct {
 type DotLCmd struct {
 	Level string
 	Dst   int
-	Src   *int
+	Src   int
 }
 type DotRCmd struct {
 	Mnemonic string
 	Type     string
-	DstSrc   *int
-	Level    *string
+	DstSrc   int
+	Level    string
+}
+type DotWCmd struct {
+	Mnemonic string
+	Type     string
+	DstSrc   int
+	Level    string
+}
+type DotQFTime struct {
+	Hours   int
+	Minutes int
+	Seconds int
+	Frames  int
+}
+type DotQCmd struct {
+	Type     string
+	Salvo    int
+	Level    string
+	Dest     int
+	Src      int
+	Count    int
+	Response bool
+	FTime    *DotQFTime
 }
 
 func DecodeDotA(line []byte) ([]DotAResp, error) {
@@ -414,7 +438,7 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 				}
 			}
 
-			cmd.Locked = &locked
+			cmd.Locked = locked
 		}
 		return cmd, nil
 	}
@@ -567,7 +591,7 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 					Msg:  "Cannot parse src",
 				}
 			}
-			cmd.Src = &src
+			cmd.Src = src
 		}
 		return cmd, nil
 	}
@@ -593,16 +617,41 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 	if matches != nil {
 		cmdType := matches[1]
 		destSrcLevel := matches[2]
-		mnemonic := matches[3]
 
 		cmd := &DotRCmd{
-			Mnemonic: mnemonic,
-			Type:     cmdType,
+			Type: cmdType,
 		}
 
 		if destSrcLevel == "" {
-			// not the comma syntax
-			return cmd, nil
+			// not the comma response syntax
+			switch cmdType {
+			// could be a command
+			case "D", "S", "E", "T":
+				// the 3rd match should be a dest or source index
+				dstSrc, err := strconv.Atoi(matches[3])
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".R",
+						Line: string(line),
+						Msg:  "Invalid dest/src in command",
+					}
+				}
+				cmd.DstSrc = dstSrc
+				if !(dstSrc > 0) {
+					return nil, &DecodeError{
+						Cmd:  ".R",
+						Line: string(line),
+						Msg:  "Dst/Src specifier must be > 0",
+					}
+				}
+
+			case "L", "M":
+				level := matches[3]
+				cmd.Level = level
+			default:
+				mnemonic := matches[3]
+				cmd.Mnemonic = mnemonic
+			}
 		} else {
 			dsl := strings.Split(destSrcLevel, ",")
 			if len(dsl) == 1 {
@@ -616,10 +665,12 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 			if err != nil {
 				// would be a level response
 				level := dsl[0]
-				cmd.Level = &level
+				cmd.Level = level
 			} else {
-				cmd.DstSrc = &dstsrc
+				cmd.DstSrc = dstsrc
 			}
+			mnemonic := matches[3]
+			cmd.Mnemonic = mnemonic
 		}
 		return cmd, nil
 	}
@@ -629,5 +680,203 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
+}
 
+func DecodeDotW(line []byte) (*DotWCmd, error) {
+	ok := dotWRegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{
+			Cmd:  ".W",
+			Line: string(line),
+			Msg:  "Invalid format",
+		}
+	}
+	matches := dotWRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		cmdType := matches[1]
+		destSrcLevel := matches[2]
+		mnemonic := matches[3]
+
+		cmd := &DotWCmd{
+			Type:     cmdType,
+			Mnemonic: mnemonic,
+		}
+
+		dstsrc, err := strconv.Atoi(destSrcLevel)
+		if err != nil {
+			// would be a level command
+			level := destSrcLevel
+			cmd.Level = level
+		} else {
+			cmd.DstSrc = dstsrc
+		}
+		return cmd, nil
+	}
+
+	return nil, &DecodeError{
+		Cmd:  ".W",
+		Line: string(line),
+		Msg:  "Invalid request",
+	}
+}
+
+func DecodeDotQ(line []byte) (*DotQCmd, error) {
+	ok := dotQRegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{
+			Cmd:  ".Q",
+			Line: string(line),
+			Msg:  "Invalid request",
+		}
+	}
+	matches := dotQRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		cmdType := matches[1]
+		salvoStr := matches[2]
+		level := matches[3]
+		destStr := matches[4]
+		srcStr := matches[5]
+		timeStr := matches[6]
+
+		salvo, err := strconv.Atoi(salvoStr)
+		if err != nil {
+			return nil, &DecodeError{
+				Cmd:  ".Q",
+				Line: string(line),
+				Msg:  "Cannot infer salvo number",
+			}
+
+		}
+
+		if !(salvo >= 0) {
+			return nil, &DecodeError{
+				Cmd:  ".Q",
+				Line: string(line),
+				Msg:  "Salvo number must be >=0",
+			}
+		}
+
+		cmd := &DotQCmd{
+			Type:  cmdType,
+			Salvo: salvo,
+		}
+
+		switch cmdType {
+		case "S":
+			dest, err := strconv.Atoi(destStr)
+			if err != nil {
+				return nil, &DecodeError{
+					Cmd:  ".Q",
+					Line: string(line),
+					Msg:  "Cannot infer destination integer",
+				}
+
+			}
+			src, err := strconv.Atoi(srcStr)
+			if err != nil {
+				return nil, &DecodeError{
+					Cmd:  ".Q",
+					Line: string(line),
+					Msg:  "Cannot infer source integer",
+				}
+
+			}
+			if level == "" || (!(dest > 0) || !(src > 0)) {
+				return nil, &DecodeError{
+					Cmd:  ".Q",
+					Line: string(line),
+					Msg:  "Invalid request",
+				}
+			}
+			cmd.Level = level
+			cmd.Dest = dest
+			cmd.Src = src
+			return cmd, nil
+		case "F":
+			if timeStr == "" {
+				// just a default .QF
+				return cmd, nil
+			}
+			timeSlice := strings.Split(timeStr, ":")
+			if len(timeSlice) > 1 {
+				hhs := timeSlice[1]
+				mms := timeSlice[2]
+				sss := timeSlice[3]
+				ffs := timeSlice[4]
+
+				hh, err := strconv.Atoi(hhs)
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".Q",
+						Line: string(line),
+						Msg:  "Cannot infer hh in timestamp",
+					}
+				}
+				mm, err := strconv.Atoi(mms)
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".Q",
+						Line: string(line),
+						Msg:  "Cannot infer mm in timestamp",
+					}
+				}
+				ss, err := strconv.Atoi(sss)
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".Q",
+						Line: string(line),
+						Msg:  "Cannot infer ss in timestamp",
+					}
+				}
+				ff, err := strconv.Atoi(ffs)
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".Q",
+						Line: string(line),
+						Msg:  "Cannot infer ff in timestamp",
+					}
+				}
+
+				ts := &DotQFTime{
+					Hours:   hh,
+					Minutes: mm,
+					Seconds: ss,
+					Frames:  ff,
+				}
+
+				cmd.FTime = ts
+
+				return cmd, nil
+
+			} else {
+				return nil, &DecodeError{
+					Cmd:  ".Q",
+					Line: string(line),
+					Msg:  "Invalid request",
+				}
+			}
+		case "L":
+			if len(matches) > 7 && matches[7] != "" {
+				val, err := strconv.Atoi(matches[7])
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".Q",
+						Line: string(line),
+						Msg:  "Cannot parse level count",
+					}
+				}
+				cmd.Count = val
+				cmd.Response = true
+			}
+			return cmd, nil
+		default:
+			return cmd, nil
+		}
+	}
+
+	return nil, &DecodeError{
+		Cmd:  ".Q",
+		Line: string(line),
+		Msg:  "Invalid request",
+	}
 }
