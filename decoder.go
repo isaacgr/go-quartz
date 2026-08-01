@@ -20,6 +20,7 @@ var dotLRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1})([0-9]{1,},-?)([0
 var dotRRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETMA]{1,2})([0-9A-Z],)?(.*)$`)
 var dotWRegexp *regexp.Regexp = regexp.MustCompile(`^([DSLETM]{1,2})([0-9A-Z]),(.*)$`)
 var dotQRegexp *regexp.Regexp = regexp.MustCompile(`^([CRFSDL])([0-9]{1,})(?:(?:([A-Z]{1})([0-9]{1,}),([0-9]{1,}))|(T1\:[0-9]{2}\:[0-9]{2}\:[0-9]{2}\:[0-9]{2})|,([0-9]{1,}))?$`)
+var dotHashRegexp *regexp.Regexp = regexp.MustCompile(`^([0-9]{1,2})((?:,[0-9]{2,3}){0,2})$`)
 
 type DecodeError struct {
 	Cmd  string
@@ -91,6 +92,10 @@ type DotQCmd struct {
 	Count    int
 	Response bool
 	FTime    *DotQFTime
+}
+type DotHashCmd struct {
+	Type   int
+	Params []int
 }
 
 func DecodeDotA(line []byte) ([]DotAResp, error) {
@@ -876,6 +881,54 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 
 	return nil, &DecodeError{
 		Cmd:  ".Q",
+		Line: string(line),
+		Msg:  "Invalid request",
+	}
+}
+
+func DecodeDotHash(line []byte) (*DotHashCmd, error) {
+	ok := dotHashRegexp.Match(line)
+	if !ok {
+		return nil, &DecodeError{
+			Cmd:  ".#",
+			Line: string(line),
+			Msg:  "Invalid request",
+		}
+	}
+	matches := dotHashRegexp.FindStringSubmatch(string(line))
+	if matches != nil {
+		cmdType, err := strconv.Atoi(matches[1])
+		cmdParams := []int{}
+		if err != nil {
+			return nil, &DecodeError{
+				Cmd:  ".#",
+				Line: string(line),
+				Msg:  "Invalid command type",
+			}
+		}
+		params := strings.Split(matches[2], ",")
+		if len(params) > 0 {
+			for _, p := range params[1:] {
+				val, err := strconv.Atoi(p)
+				if err != nil {
+					return nil, &DecodeError{
+						Cmd:  ".#",
+						Line: string(line),
+						Msg:  "Invalid command parameter",
+					}
+				}
+				cmdParams = append(cmdParams, val)
+			}
+		}
+		cmd := &DotHashCmd{
+			Type:   cmdType,
+			Params: cmdParams,
+		}
+		return cmd, nil
+	}
+
+	return nil, &DecodeError{
+		Cmd:  ".#",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}

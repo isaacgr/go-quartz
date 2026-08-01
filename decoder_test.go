@@ -927,3 +927,65 @@ func TestDecodeDotQ(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeDotHash(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantCmd *DotHashCmd
+		wantErr bool
+	}{
+		{
+			"Test router connected",
+			[]byte("01"),
+			&DotHashCmd{Type: 1, Params: []int{}},
+			false,
+		},
+		{
+			"Test one param",
+			[]byte("12,01"),
+			&DotHashCmd{Type: 12, Params: []int{1}},
+			false,
+		},
+		{
+			"Test one param 3 digit",
+			[]byte("40,011"),
+			&DotHashCmd{Type: 40, Params: []int{11}},
+			false,
+		},
+		{
+			"Test two param",
+			[]byte("47,01,02"),
+			&DotHashCmd{Type: 47, Params: []int{1, 2}},
+			false,
+		},
+		{
+			"Test three param",
+			[]byte("01,99,99,99"),
+			nil,
+			true,
+		},
+		{
+			"Empty input",
+			[]byte(""),
+			nil,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := DecodeDotHash(tt.input)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf("DecodeDotHash(%q) unexpected error = %v", tt.input, err)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf("DecodeDotHash(%q) expected error, but got none", tt.input)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf("DecodeDotHash(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+				}
+			}
+		})
+	}
+}
