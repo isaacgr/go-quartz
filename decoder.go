@@ -10,7 +10,7 @@ import (
 
 var dotARegexp *regexp.Regexp = regexp.MustCompile(`([A-Z]+)([0-9]+),([0-9]+)`)
 var dotERegexp *regexp.Regexp = regexp.MustCompile("^[E]$")
-var dotSRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
+var xptRegexp *regexp.Regexp = regexp.MustCompile("^([A-Z]{1,17})([0-9]{1,}),([0-9]{1,})$")
 var dotMRegexp *regexp.Regexp = regexp.MustCompile("([A-Za-z]+)?([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*),([A-Za-z0-9]+(?:[+-][A-Za-z0-9]+)*)")
 var dotMPlusRegexp *regexp.Regexp = regexp.MustCompile(`([A-Za-z]+)?(\d+)`)
 var dotBRegexp *regexp.Regexp = regexp.MustCompile("^([LUIA])([0-9]{1,})(,[0-9]{1,})?$")
@@ -23,15 +23,13 @@ var dotQRegexp *regexp.Regexp = regexp.MustCompile(`^([CRFSDL])([0-9]{1,})(?:(?:
 var dotHashRegexp *regexp.Regexp = regexp.MustCompile(`^([0-9]{1,2})((?:,[0-9]{2,3}){0,2})$`)
 
 type DecodeError struct {
-	Cmd  string
 	Line string
 	Msg  string
 }
 
 func (e *DecodeError) Error() string {
 	return fmt.Sprintf(
-		"Unable to decode command. Cmd [%s], Line [%s], Error [%s]",
-		e.Cmd,
+		"Unable to decode command. Line [%s], Error [%s]",
 		e.Line,
 		e.Msg,
 	)
@@ -43,7 +41,7 @@ type DotAResp struct {
 	Src   int
 }
 type DotEResp struct{}
-type SetXptCmd struct {
+type XptMsg struct {
 	Levels []string
 	Dst    int
 	Src    int
@@ -103,7 +101,6 @@ func DecodeDotA(line []byte) ([]DotAResp, error) {
 	ok := dotARegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".A",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -114,7 +111,6 @@ func DecodeDotA(line []byte) ([]DotAResp, error) {
 		for _, match := range matches {
 			if len(match[1]) > 1 {
 				return nil, &DecodeError{
-					Cmd:  ".A",
 					Line: string(line),
 					Msg:  "Too many levels in response message",
 				}
@@ -125,7 +121,6 @@ func DecodeDotA(line []byte) ([]DotAResp, error) {
 			dst, err := strconv.Atoi(match[2])
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".A",
 					Line: string(line),
 					Msg:  "Cannot infer dst index",
 				}
@@ -133,7 +128,6 @@ func DecodeDotA(line []byte) ([]DotAResp, error) {
 			src, err := strconv.Atoi(match[3])
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".A",
 					Line: string(line),
 					Msg:  "Cannot infer src index",
 				}
@@ -147,7 +141,6 @@ func DecodeDotA(line []byte) ([]DotAResp, error) {
 		return resp, nil
 	}
 	return nil, &DecodeError{
-		Cmd:  ".A",
 		Line: string(line),
 		Msg:  "Invalid response format",
 	}
@@ -158,7 +151,6 @@ func DecodeDotE(line []byte) (*DotEResp, error) {
 	ok := dotERegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".E",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -166,23 +158,22 @@ func DecodeDotE(line []byte) (*DotEResp, error) {
 	return &DotEResp{}, nil
 }
 
-func DecodeDotS(line []byte) (*SetXptCmd, error) {
+func DecodeDotSDotU(line []byte) (*XptMsg, error) {
 	// cmd = VAB...1,1 or VAB...001,001
-	ok := dotSRegexp.Match(line)
+	// Valid for .S or .U
+	ok := xptRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".S",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
 	}
-	matches := dotSRegexp.FindStringSubmatch(string(line))
+	matches := xptRegexp.FindStringSubmatch(string(line))
 	if matches != nil {
 		levels := strings.Split(matches[1], "")
 		dst, err := strconv.Atoi(matches[2])
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".S",
 				Line: string(line),
 				Msg:  "Cannot infer dst index",
 			}
@@ -190,34 +181,31 @@ func DecodeDotS(line []byte) (*SetXptCmd, error) {
 		src, err := strconv.Atoi(matches[3])
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".S",
 				Line: string(line),
 				Msg:  "Cannot infer src index",
 			}
 		}
-		return &SetXptCmd{
+		return &XptMsg{
 			Levels: levels,
 			Dst:    dst,
 			Src:    src,
 		}, nil
 	}
 	return nil, &DecodeError{
-		Cmd:  ".S",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
 }
 
-func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
+func DecodeDotM(line []byte) ([]*XptMsg, error) {
 	ok := dotMRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".M",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
 	}
-	resp := []*SetXptCmd{}
+	resp := []*XptMsg{}
 	// TODO: The plus sign case is confusing, because it seems to indicate
 	// that a src can have a +, but I'm not sure how that makes sense since
 	// its not appending any different type (like a new level)
@@ -227,7 +215,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 		ok = dotMPlusRegexp.Match(line)
 		if !ok {
 			return nil, &DecodeError{
-				Cmd:  ".M",
 				Line: string(line),
 				Msg:  "Invalid (+) syntax",
 			}
@@ -246,7 +233,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 					dst, err := strconv.Atoi(m[2])
 					if err != nil {
 						return nil, &DecodeError{
-							Cmd:  ".M",
 							Line: string(line),
 							Msg:  "Cannot infer dst index",
 						}
@@ -254,12 +240,11 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 					src, err := strconv.Atoi(m[3])
 					if err != nil {
 						return nil, &DecodeError{
-							Cmd:  ".M",
 							Line: string(line),
 							Msg:  "Cannot infer src index",
 						}
 					}
-					resp = append(resp, &SetXptCmd{
+					resp = append(resp, &XptMsg{
 						Levels: []string{m[1]},
 						Src:    dst,
 						Dst:    src,
@@ -268,7 +253,7 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 				return resp, nil
 			}
 			// Range case or like .S (i.e. .MV1,1)
-			ok := dotSRegexp.Match(line)
+			ok := xptRegexp.Match(line)
 			if !ok {
 				// Might be the range case
 				match := matches[0]
@@ -278,7 +263,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 				if len(dstRange) > 1 && len(srcRange) > 1 {
 					if len(dstRange) != len(srcRange) {
 						return nil, &DecodeError{
-							Cmd:  ".M",
 							Line: string(line),
 							Msg:  "Unequal src/dst ranges",
 						}
@@ -288,7 +272,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						dst, err := strconv.Atoi(d)
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer dst index",
 							}
@@ -296,12 +279,11 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						src, err := strconv.Atoi(s)
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer src index",
 							}
 						}
-						resp = append(resp, &SetXptCmd{
+						resp = append(resp, &XptMsg{
 							Levels: levels,
 							Dst:    dst,
 							Src:    src,
@@ -313,7 +295,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						dst, err := strconv.Atoi(d)
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer dst index",
 							}
@@ -321,12 +302,11 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						src, err := strconv.Atoi(srcRange[0])
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer src index",
 							}
 						}
-						resp = append(resp, &SetXptCmd{
+						resp = append(resp, &XptMsg{
 							Levels: levels,
 							Dst:    dst,
 							Src:    src,
@@ -339,7 +319,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						dst, err := strconv.Atoi(d)
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer dst index",
 							}
@@ -347,12 +326,11 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 						src, err := strconv.Atoi(srcRange[0])
 						if err != nil {
 							return nil, &DecodeError{
-								Cmd:  ".M",
 								Line: string(line),
 								Msg:  "Cannot infer src index",
 							}
 						}
-						resp = append(resp, &SetXptCmd{
+						resp = append(resp, &XptMsg{
 							Levels: levels,
 							Dst:    dst,
 							Src:    src,
@@ -361,13 +339,12 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 					return resp, nil
 				}
 			}
-			matches := dotSRegexp.FindStringSubmatch(string(line))
+			matches := xptRegexp.FindStringSubmatch(string(line))
 			if matches != nil {
 				levels := strings.Split(matches[1], "")
 				dst, err := strconv.Atoi(matches[2])
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".M",
 						Line: string(line),
 						Msg:  "Cannot infer dst index",
 					}
@@ -375,12 +352,11 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 				src, err := strconv.Atoi(matches[3])
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".M",
 						Line: string(line),
 						Msg:  "Cannot infer src index",
 					}
 				}
-				resp = append(resp, &SetXptCmd{
+				resp = append(resp, &XptMsg{
 					Levels: levels,
 					Src:    src,
 					Dst:    dst,
@@ -391,7 +367,6 @@ func DecodeDotM(line []byte) ([]*SetXptCmd, error) {
 
 	}
 	return nil, &DecodeError{
-		Cmd:  ".M",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -402,7 +377,6 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 	ok := dotBRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".B",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -415,7 +389,6 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 		dest, err = strconv.Atoi(matches[2])
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".B",
 				Line: string(line),
 				Msg:  "Cannot parse dst",
 			}
@@ -429,7 +402,6 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 		if cmdType == "A" {
 			if len(matches) < 4 {
 				return nil, &DecodeError{
-					Cmd:  ".B",
 					Line: string(line),
 					Msg:  "Missing lock state",
 				}
@@ -437,7 +409,6 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 			locked, err := strconv.Atoi(strings.Split(matches[3], ",")[1])
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".B",
 					Line: string(line),
 					Msg:  "Cannot parse lock state",
 				}
@@ -448,7 +419,6 @@ func DecodeDotB(line []byte) (*DstLockCmd, error) {
 		return cmd, nil
 	}
 	return nil, &DecodeError{
-		Cmd:  ".B",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -459,7 +429,6 @@ func DecodeDotF(line []byte) (*DotFCmd, error) {
 	ok := dotFRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".F",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -469,14 +438,12 @@ func DecodeDotF(line []byte) (*DotFCmd, error) {
 		val, err := strconv.Atoi(matches[0])
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".F",
 				Line: string(line),
 				Msg:  "Cannot parse salvo",
 			}
 		}
 		if val > 32 || val < 1 {
 			return nil, &DecodeError{
-				Cmd:  ".F",
 				Line: string(line),
 				Msg:  "Salvo out of range",
 			}
@@ -487,7 +454,6 @@ func DecodeDotF(line []byte) (*DotFCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".F",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -498,7 +464,6 @@ func DecodeDotI(line []byte) (*DotICmd, error) {
 	ok := dotIRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".I",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -509,14 +474,12 @@ func DecodeDotI(line []byte) (*DotICmd, error) {
 		dst, err := strconv.Atoi(matches[2])
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".I",
 				Line: string(line),
 				Msg:  "Cannot parse dst",
 			}
 		}
 		if !(dst > 0) {
 			return nil, &DecodeError{
-				Cmd:  ".I",
 				Line: string(line),
 				Msg:  "Dst must be > 0",
 			}
@@ -528,7 +491,6 @@ func DecodeDotI(line []byte) (*DotICmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".I",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -539,7 +501,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 	ok := dotLRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".L",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -550,7 +511,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 		dstRange := strings.Split(matches[2], ",")
 		if !(len(dstRange) > 1) {
 			return nil, &DecodeError{
-				Cmd:  ".L",
 				Line: string(line),
 				Msg:  "Invalid command format",
 			}
@@ -561,7 +521,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 		dst, err := strconv.Atoi(dstStr)
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".L",
 				Line: string(line),
 				Msg:  "Cannot parse dst",
 			}
@@ -569,7 +528,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 
 		if !(dst > 0) {
 			return nil, &DecodeError{
-				Cmd:  ".L",
 				Line: string(line),
 				Msg:  "Dst must be > 0",
 			}
@@ -583,7 +541,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 		if matches[3] != "" {
 			if strings.Contains(matches[2], "-") {
 				return nil, &DecodeError{
-					Cmd:  ".L",
 					Line: string(line),
 					Msg:  "Invalid request",
 				}
@@ -591,7 +548,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 			src, err := strconv.Atoi(matches[3])
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".L",
 					Line: string(line),
 					Msg:  "Cannot parse src",
 				}
@@ -602,7 +558,6 @@ func DecodeDotL(line []byte) (*DotLCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".L",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -613,7 +568,6 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 	ok := dotRRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".R",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -636,7 +590,6 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 				dstSrc, err := strconv.Atoi(matches[3])
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".R",
 						Line: string(line),
 						Msg:  "Invalid dest/src in command",
 					}
@@ -644,7 +597,6 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 				cmd.DstSrc = dstSrc
 				if !(dstSrc > 0) {
 					return nil, &DecodeError{
-						Cmd:  ".R",
 						Line: string(line),
 						Msg:  "Dst/Src specifier must be > 0",
 					}
@@ -661,7 +613,6 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 			dsl := strings.Split(destSrcLevel, ",")
 			if len(dsl) == 1 {
 				return nil, &DecodeError{
-					Cmd:  ".R",
 					Line: string(line),
 					Msg:  "Invalid dest/src/level in response",
 				}
@@ -681,7 +632,6 @@ func DecodeDotR(line []byte) (*DotRCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".R",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -691,7 +641,6 @@ func DecodeDotW(line []byte) (*DotWCmd, error) {
 	ok := dotWRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".W",
 			Line: string(line),
 			Msg:  "Invalid format",
 		}
@@ -719,7 +668,6 @@ func DecodeDotW(line []byte) (*DotWCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".W",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -729,7 +677,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 	ok := dotQRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".Q",
 			Line: string(line),
 			Msg:  "Invalid request",
 		}
@@ -746,7 +693,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 		salvo, err := strconv.Atoi(salvoStr)
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".Q",
 				Line: string(line),
 				Msg:  "Cannot infer salvo number",
 			}
@@ -755,7 +701,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 
 		if !(salvo >= 0) {
 			return nil, &DecodeError{
-				Cmd:  ".Q",
 				Line: string(line),
 				Msg:  "Salvo number must be >=0",
 			}
@@ -771,7 +716,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 			dest, err := strconv.Atoi(destStr)
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".Q",
 					Line: string(line),
 					Msg:  "Cannot infer destination integer",
 				}
@@ -780,7 +724,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 			src, err := strconv.Atoi(srcStr)
 			if err != nil {
 				return nil, &DecodeError{
-					Cmd:  ".Q",
 					Line: string(line),
 					Msg:  "Cannot infer source integer",
 				}
@@ -788,7 +731,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 			}
 			if level == "" || (!(dest > 0) || !(src > 0)) {
 				return nil, &DecodeError{
-					Cmd:  ".Q",
 					Line: string(line),
 					Msg:  "Invalid request",
 				}
@@ -812,7 +754,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 				hh, err := strconv.Atoi(hhs)
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".Q",
 						Line: string(line),
 						Msg:  "Cannot infer hh in timestamp",
 					}
@@ -820,7 +761,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 				mm, err := strconv.Atoi(mms)
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".Q",
 						Line: string(line),
 						Msg:  "Cannot infer mm in timestamp",
 					}
@@ -828,7 +768,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 				ss, err := strconv.Atoi(sss)
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".Q",
 						Line: string(line),
 						Msg:  "Cannot infer ss in timestamp",
 					}
@@ -836,7 +775,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 				ff, err := strconv.Atoi(ffs)
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".Q",
 						Line: string(line),
 						Msg:  "Cannot infer ff in timestamp",
 					}
@@ -855,7 +793,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 
 			} else {
 				return nil, &DecodeError{
-					Cmd:  ".Q",
 					Line: string(line),
 					Msg:  "Invalid request",
 				}
@@ -865,7 +802,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 				val, err := strconv.Atoi(matches[7])
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".Q",
 						Line: string(line),
 						Msg:  "Cannot parse level count",
 					}
@@ -880,7 +816,6 @@ func DecodeDotQ(line []byte) (*DotQCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".Q",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}
@@ -890,7 +825,6 @@ func DecodeDotHash(line []byte) (*DotHashCmd, error) {
 	ok := dotHashRegexp.Match(line)
 	if !ok {
 		return nil, &DecodeError{
-			Cmd:  ".#",
 			Line: string(line),
 			Msg:  "Invalid request",
 		}
@@ -901,7 +835,6 @@ func DecodeDotHash(line []byte) (*DotHashCmd, error) {
 		cmdParams := []int{}
 		if err != nil {
 			return nil, &DecodeError{
-				Cmd:  ".#",
 				Line: string(line),
 				Msg:  "Invalid command type",
 			}
@@ -912,7 +845,6 @@ func DecodeDotHash(line []byte) (*DotHashCmd, error) {
 				val, err := strconv.Atoi(p)
 				if err != nil {
 					return nil, &DecodeError{
-						Cmd:  ".#",
 						Line: string(line),
 						Msg:  "Invalid command parameter",
 					}
@@ -928,7 +860,6 @@ func DecodeDotHash(line []byte) (*DotHashCmd, error) {
 	}
 
 	return nil, &DecodeError{
-		Cmd:  ".#",
 		Line: string(line),
 		Msg:  "Invalid request",
 	}

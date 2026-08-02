@@ -20,6 +20,7 @@ type Cmd byte
 const (
 	DotE    Cmd = 'E'
 	DotA    Cmd = 'A'
+	DotU    Cmd = 'U'
 	DotS    Cmd = 'S'
 	DotM    Cmd = 'M'
 	DotB    Cmd = 'B'
@@ -279,7 +280,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			)
 			return
 		}
-		cmd, err := DecodeDotS(line[2:])
+		cmd, err := DecodeDotSDotU(line[2:])
 		if err != nil {
 			p.handleError(err)
 			return
@@ -453,6 +454,8 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 		}
 		handler(p, cmd)
 	case '&':
+		// TODO
+		p.handleUnknownCmd(line)
 	default:
 		p.handleUnknownCmd(line)
 	}
@@ -494,7 +497,23 @@ func (p *QuartzProtocol) sendLine(line []byte) error {
 	}
 }
 
-func (p *QuartzProtocol) handleUpdate(line []byte) {}
+func (p *QuartzProtocol) handleUpdate(line []byte) {
+	handler, ok := p.commandHandlers[DotU]
+	if !ok {
+		p.log.Error(
+			"No matching handler found for command",
+			"Cmd",
+			string(DotU),
+		)
+		return
+	}
+	cmd, err := DecodeDotSDotU(line[2:])
+	if err != nil {
+		p.handleError(err)
+		return
+	}
+	handler(p, cmd)
+}
 
 func (p *QuartzProtocol) handleResponse(line []byte) {
 	handler, ok := p.commandHandlers[DotA]

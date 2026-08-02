@@ -7,26 +7,40 @@ import (
 
 func TestDecodeDotE(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   []byte
-		wantErr bool
+		name     string
+		input    []byte
+		wantResp *DotEResp
+		wantErr  bool
 	}{
-		{"valid", []byte("E"), false},
-		{"extra info", []byte("E - Invalid route"), true}, // TODO: This may change
-		{"starts with another letter", []byte("EE"), true},
-		{"empty", []byte(""), true},
-		{"lowercase", []byte("e"), true},
+		{"valid", []byte("E"), &DotEResp{}, false},
+		{"extra info", []byte("E - Invalid route"), nil, true}, // TODO: This may change
+		{"starts with another letter", []byte("EE"), nil, true},
+		{"empty", []byte(""), nil, true},
+		{"lowercase", []byte("e"), nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeDotE(tt.input)
+			resp, err := DecodeDotE(tt.input)
 			if err != nil {
 				if !tt.wantErr {
 					t.Errorf(
-						"DecodeDotE(%q) error = %v, wantErr %v",
+						"DecodeDotE(%q) unexpected error = %v",
 						tt.input,
 						err,
-						tt.wantErr,
+					)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf(
+						"DecodeDotE(%q) expected error, but got none",
+						tt.input,
+					)
+				} else if !reflect.DeepEqual(resp, tt.wantResp) {
+					t.Errorf(
+						"DecodeDotE(%q) got = %+v, want %+v",
+						tt.input,
+						resp,
+						tt.wantResp,
 					)
 				}
 			}
@@ -45,7 +59,7 @@ func TestDecodeDotA(t *testing.T) {
 			"valid level,dst,src",
 			[]byte("V1,1"),
 			[]DotAResp{
-				DotAResp{
+				{
 					Level: "V",
 					Src:   1,
 					Dst:   1,
@@ -57,17 +71,17 @@ func TestDecodeDotA(t *testing.T) {
 			"valid multi level,dst,src",
 			[]byte("V1,1A1,1B1,2"),
 			[]DotAResp{
-				DotAResp{
+				{
 					Level: "V",
 					Src:   1,
 					Dst:   1,
 				},
-				DotAResp{
+				{
 					Level: "A",
 					Src:   1,
 					Dst:   1,
 				},
-				DotAResp{
+				{
 					Level: "B",
 					Src:   2,
 					Dst:   1,
@@ -119,44 +133,24 @@ func TestDecodeDotA(t *testing.T) {
 			if err != nil {
 				if !tt.wantErr {
 					t.Errorf(
-						"DecodeDotA(%q) error = %v, wantErr %v",
+						"DecodeDotA(%q) unexpected error = %v",
 						tt.input,
 						err,
-						tt.wantErr,
 					)
 				}
 			} else {
 				if tt.wantErr {
 					t.Errorf(
-						"DecodeDotA(%q) error = %v, wantErr %v",
+						"DecodeDotA(%q) expected error, but got none",
 						tt.input,
-						err,
-						tt.wantErr,
 					)
-				} else {
-					for i, r := range tt.wantResp {
-						if r.Level != resp[i].Level {
-							t.Errorf(
-								"Incorrect level received. got=%v, want=%v",
-								resp,
-								r,
-							)
-						}
-						if r.Dst != resp[i].Dst {
-							t.Errorf(
-								"Incorrect dst received. got=%v, want=%v",
-								resp,
-								r,
-							)
-						}
-						if r.Src != resp[i].Src {
-							t.Errorf(
-								"Incorrect src received. got=%v, want=%v",
-								resp,
-								r,
-							)
-						}
-					}
+				} else if !reflect.DeepEqual(resp, tt.wantResp) {
+					t.Errorf(
+						"DecodeDotA(%q) got = %+v, want %+v",
+						tt.input,
+						resp,
+						tt.wantResp,
+					)
 				}
 			}
 		})
@@ -167,28 +161,64 @@ func TestDecodeDotS(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []byte
+		wantCmd *XptMsg
 		wantErr bool
 	}{
-		{"valid single digit", []byte("V1,1"), false},
-		{"valid multi-level", []byte("VABCDEFGHIJKLMNOP1,1"), false},
-		{"valid multi digit", []byte("VAB001,001"), false},
-		{"invalid multi-level", []byte("VABCDEFGHIJKLMNOPQ1,1"), true},
-		{"no digits", []byte("V,"), true},
-		{"missing comma", []byte("V11"), true},
-		{"starts with digit", []byte("1V,1"), true},
-		{"empty", []byte(""), true},
-		{"lowercase", []byte("v1,1"), true},
+		{
+			"valid single digit",
+			[]byte("V1,1"),
+			&XptMsg{Levels: []string{"V"}, Dst: 1, Src: 1},
+			false,
+		},
+		{
+			"valid multi-level",
+			[]byte("VABCDEFGHIJKLMNOP1,1"),
+			&XptMsg{
+				Levels: []string{
+					"V", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+					"K", "L", "M", "N", "O", "P",
+				},
+				Dst: 1,
+				Src: 1,
+			},
+			false,
+		},
+		{
+			"valid multi digit",
+			[]byte("VAB001,001"),
+			&XptMsg{Levels: []string{"V", "A", "B"}, Dst: 1, Src: 1},
+			false,
+		},
+		{"invalid multi-level", []byte("VABCDEFGHIJKLMNOPQ1,1"), nil, true},
+		{"no digits", []byte("V,"), nil, true},
+		{"missing comma", []byte("V11"), nil, true},
+		{"starts with digit", []byte("1V,1"), nil, true},
+		{"empty", []byte(""), nil, true},
+		{"lowercase", []byte("v1,1"), nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeDotS(tt.input)
+			cmd, err := DecodeDotSDotU(tt.input)
 			if err != nil {
 				if !tt.wantErr {
 					t.Errorf(
-						"DecodeDotS(%q) error = %v, wantErr %v",
+						"DecodeDotS(%q) unexpected error = %v",
 						tt.input,
 						err,
-						tt.wantErr,
+					)
+				}
+			} else {
+				if tt.wantErr {
+					t.Errorf(
+						"DecodeDotS(%q) expected error, but got none",
+						tt.input,
+					)
+				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
+					t.Errorf(
+						"DecodeDotS(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
 					)
 				}
 			}
@@ -198,30 +228,95 @@ func TestDecodeDotS(t *testing.T) {
 
 func TestDecodeDotM(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   []byte
-		wantErr bool
+		name     string
+		input    []byte
+		wantResp []*XptMsg
+		wantErr  bool
 	}{
-		{"valid single digit", []byte("V1,1"), false},
-		{"valid multi-level", []byte("VA1,1"), false},
-		{"valid multi digit", []byte("VAB001,001"), false},
-		{"valid multi route", []byte("V1,1,A1,1,B1,1"), false},
-		{"valid dest range", []byte("VA1-5,1"), false},
-		{"valid dest range multi digit", []byte("VA001-005,001"), false},
-		{"valid src range", []byte("VA1-5,10-14"), false},
-		{"valid src range multi digit", []byte("VA001-005,010-014"), false},
-		//{"valid dest level add param", []byte("V1+A1+B2,1"), false},
+		{
+			"valid single digit",
+			[]byte("V1,1"),
+			[]*XptMsg{{Levels: []string{"V"}, Dst: 1, Src: 1}},
+			false,
+		},
+		{
+			"valid multi-level",
+			[]byte("VA1,1"),
+			[]*XptMsg{{Levels: []string{"V", "A"}, Dst: 1, Src: 1}},
+			false,
+		},
+		{
+			"valid multi digit",
+			[]byte("VAB001,001"),
+			[]*XptMsg{{Levels: []string{"V", "A", "B"}, Dst: 1, Src: 1}},
+			false,
+		},
+		{
+			"valid multi route",
+			[]byte("V1,1,A1,1,B1,1"),
+			[]*XptMsg{
+				{Levels: []string{"V"}, Dst: 1, Src: 1},
+				{Levels: []string{"A"}, Dst: 1, Src: 1},
+				{Levels: []string{"B"}, Dst: 1, Src: 1},
+			},
+			false,
+		},
+		{
+			"valid dest range",
+			[]byte("VA1-5,1"),
+			[]*XptMsg{
+				{Levels: []string{"V", "A"}, Dst: 1, Src: 1},
+				{Levels: []string{"V", "A"}, Dst: 5, Src: 1},
+			},
+			false,
+		},
+		{
+			"valid dest range multi digit",
+			[]byte("VA001-005,001"),
+			[]*XptMsg{
+				{Levels: []string{"V", "A"}, Dst: 1, Src: 1},
+				{Levels: []string{"V", "A"}, Dst: 5, Src: 1},
+			},
+			false,
+		},
+		{
+			"valid src range",
+			[]byte("VA1-5,10-14"),
+			[]*XptMsg{
+				{Levels: []string{"V", "A"}, Dst: 1, Src: 10},
+				{Levels: []string{"V", "A"}, Dst: 5, Src: 14},
+			},
+			false,
+		},
+		{
+			"valid src range multi digit",
+			[]byte("VA001-005,010-014"),
+			[]*XptMsg{
+				{Levels: []string{"V", "A"}, Dst: 1, Src: 10},
+				{Levels: []string{"V", "A"}, Dst: 5, Src: 14},
+			},
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeDotM(tt.input)
+			resp, err := DecodeDotM(tt.input)
 			if err != nil {
 				if !tt.wantErr {
+					t.Errorf("DecodeDotM(%q) unexpected error = %v", tt.input, err)
+				}
+			} else {
+				if tt.wantErr {
 					t.Errorf(
-						"DecodeDotM(%q) error = %v, wantErr %v",
+						"DecodeDotM(%q) expected error, but got none",
 						tt.input,
-						err,
-						tt.wantErr,
+					)
+				} else if !reflect.DeepEqual(resp, tt.wantResp) {
+					t.Errorf(
+						"DecodeDotM(%q) got = %+v, want %+v",
+						tt.input,
+						resp,
+						tt.wantResp,
 					)
 				}
 			}
@@ -311,13 +406,25 @@ func TestDecodeDotB(t *testing.T) {
 			cmd, err := DecodeDotB(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotB(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotB(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotB(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotB(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotB(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotB(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
@@ -560,13 +667,25 @@ func TestDecodeDotL(t *testing.T) {
 			cmd, err := DecodeDotL(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotL(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotL(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotL(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotL(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotL(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotL(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
@@ -709,13 +828,25 @@ func TestDecodeDotR(t *testing.T) {
 			cmd, err := DecodeDotR(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotR(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotR(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotR(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotR(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotR(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotR(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
@@ -777,13 +908,25 @@ func TestDecodeDotW(t *testing.T) {
 			cmd, err := DecodeDotW(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotW(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotW(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotW(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotW(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotW(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotW(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
@@ -915,13 +1058,25 @@ func TestDecodeDotQ(t *testing.T) {
 			cmd, err := DecodeDotQ(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotQ(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotQ(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotQ(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotQ(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotQ(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotQ(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
@@ -977,15 +1132,38 @@ func TestDecodeDotHash(t *testing.T) {
 			cmd, err := DecodeDotHash(tt.input)
 			if err != nil {
 				if !tt.wantErr {
-					t.Errorf("DecodeDotHash(%q) unexpected error = %v", tt.input, err)
+					t.Errorf(
+						"DecodeDotHash(%q) unexpected error = %v",
+						tt.input,
+						err,
+					)
 				}
 			} else {
 				if tt.wantErr {
-					t.Errorf("DecodeDotHash(%q) expected error, but got none", tt.input)
+					t.Errorf(
+						"DecodeDotHash(%q) expected error, but got none",
+						tt.input,
+					)
 				} else if !reflect.DeepEqual(cmd, tt.wantCmd) {
-					t.Errorf("DecodeDotHash(%q) got = %+v, want %+v", tt.input, cmd, tt.wantCmd)
+					t.Errorf(
+						"DecodeDotHash(%q) got = %+v, want %+v",
+						tt.input,
+						cmd,
+						tt.wantCmd,
+					)
 				}
 			}
 		})
+	}
+}
+
+func TestDecodeError(t *testing.T) {
+	err := &DecodeError{
+		Line: "INVALID",
+		Msg:  "Invalid format",
+	}
+	expected := "Unable to decode command. Line [INVALID], Error [Invalid format]"
+	if err.Error() != expected {
+		t.Errorf("DecodeError.Error() = %q, want %q", err.Error(), expected)
 	}
 }
