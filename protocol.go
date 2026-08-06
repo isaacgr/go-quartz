@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 )
 
 const (
@@ -33,6 +34,10 @@ const (
 	DotHash Cmd = '#'
 )
 
+type Command struct {
+	command  string   // the string to be encoded (i.e. ".SV1,1")
+	respChan chan any // the decoded response
+}
 type CommandHandler func(p *QuartzProtocol, cmd any)
 type ConnectionHandler func(p *QuartzProtocol, conn net.Conn)
 
@@ -43,14 +48,21 @@ type QuartzProtocol struct {
 	delimiter string
 	maxLength int
 
-	readErrors chan error
-	lines      chan []byte
-	writes     chan []byte
+	readErrors  chan error
+	writeErrors chan error
+	lines       chan []byte
+	writes      chan []byte
+
+	commands    chan Command
+	current     *Command
+	outstanding []Command
 
 	closeSig              chan struct{}
 	commandHandlers       map[Cmd]CommandHandler
 	connectionMadeHandler ConnectionHandler
 	connectionLostHandler ConnectionHandler
+
+	shutdownOnce sync.Once
 }
 
 type PcolOpts struct {
@@ -92,9 +104,10 @@ func NewProtocol(
 		delimiter: delimiter,
 		maxLength: maxLength,
 
-		lines:      make(chan []byte, 1),
-		writes:     make(chan []byte, 1),
-		readErrors: make(chan error, 1),
+		lines:       make(chan []byte, 1),
+		writes:      make(chan []byte, 1),
+		readErrors:  make(chan error, 1),
+		writeErrors: make(chan error, 1),
 
 		commandHandlers: make(map[Cmd]CommandHandler),
 
@@ -106,6 +119,7 @@ func (p *QuartzProtocol) Start() {
 	go p.dispatch()
 	go p.readLines()
 	go p.writeLines()
+	go p.commandQueue()
 }
 
 func (p *QuartzProtocol) Stop() {
@@ -125,10 +139,10 @@ func (p *QuartzProtocol) AddConnectionMadeHandler(handler ConnectionHandler) {
 }
 
 func (p *QuartzProtocol) AddConnectionLostHandler(handler ConnectionHandler) {
-	if p.connectionMadeHandler != nil {
+	if p.connectionLostHandler != nil {
 		p.log.Error("Connection lost handler already registered")
 	} else {
-		p.connectionMadeHandler = handler
+		p.connectionLostHandler = handler
 	}
 }
 
@@ -137,6 +151,38 @@ func (p *QuartzProtocol) AddCommandHandler(cmd Cmd, handler CommandHandler) {
 		p.log.Error("Handler already registered for command", "Cmd", cmd)
 	} else {
 		p.commandHandlers[cmd] = handler
+	}
+}
+
+func (p *QuartzProtocol) IssueCommand(cmd string) (<-chan any, error) {
+	respChan := make(chan any, 1)
+	c := Command{
+		command:  cmd,
+		respChan: respChan,
+	}
+	select {
+	case p.commands <- c:
+		return respChan, nil
+	case <-p.closeSig:
+		return nil, errors.New("protocol closed")
+	}
+}
+
+func (p *QuartzProtocol) commandQueue() {
+	for {
+		select {
+		case cmd, ok := <-p.commands:
+			if !ok {
+				// TODO
+				return
+			}
+			if p.current == nil {
+				p.current = &cmd
+			} else {
+				p.outstanding = append(p.outstanding, cmd)
+				p.sendLine([]byte(cmd.command + p.delimiter))
+			}
+		}
 	}
 }
 
@@ -150,6 +196,12 @@ func (p *QuartzProtocol) dispatch() {
 			}
 			p.handleLine(line)
 		case err, ok := <-p.readErrors:
+			if !ok {
+				// TODO: close some channel that will close the protocol
+				return
+			}
+			p.handleShutdown(err.Error())
+		case err, ok := <-p.writeErrors:
 			if !ok {
 				// TODO: close some channel that will close the protocol
 				return
@@ -170,7 +222,7 @@ func (p *QuartzProtocol) writeLines() {
 				"Error",
 				err,
 			)
-			// TODO: What should happen? Close the connection?
+			p.writeErrors <- err
 		}
 	}
 }
@@ -556,7 +608,18 @@ func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 	handler(p, cmd)
 }
 
-func (p *QuartzProtocol) handleNullCmd(line []byte) {}
+func (p *QuartzProtocol) handleNullCmd(line []byte) {
+	p.log.Warn(
+		"Received empty command",
+		"Line",
+		string(line),
+	)
+	dotE := &ErrResp{}
+	err := p.sendLine([]byte(dotE.Error()))
+	if err != nil {
+		p.log.Error("Unable to send .E response", "Error", err)
+	}
+}
 
 func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
 	p.log.Warn(
@@ -573,7 +636,20 @@ func (p *QuartzProtocol) handleUnknownCmd(line []byte) {
 
 // handleShutdown closes the transport and stops the protocol
 func (p *QuartzProtocol) handleShutdown(reason string) {
-	p.log.Error("Shutting down", "Reason", reason)
-	// TODO: this should trigger a handler for the transport conn closing
-	p.Stop()
+	p.shutdownOnce.Do(
+		func() {
+			p.log.Info("Shutting down protocol", "Reason", reason)
+			p.transport.Close()
+			for _, cmd := range p.outstanding {
+				err := ErrResp{
+					Msg: reason,
+				}
+				cmd.respChan <- []byte(err.Error())
+				close(cmd.respChan)
+			}
+			// TODO: this should trigger a handler for the transport conn closing
+			// Should i be calling connection lost?
+			p.Stop()
+		},
+	)
 }

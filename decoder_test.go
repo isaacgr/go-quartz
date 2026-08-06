@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestDecodeError(t *testing.T) {
+	err := &DecodeError{
+		Line: "INVALID",
+		Msg:  "Invalid format",
+	}
+	expected := "Unable to decode command. Line [INVALID], Error [Invalid format]"
+	if err.Error() != expected {
+		t.Errorf("DecodeError.Error() = %q, want %q", err.Error(), expected)
+	}
+}
+
 func TestDecodeDotE(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -157,7 +168,7 @@ func TestDecodeDotA(t *testing.T) {
 	}
 }
 
-func TestDecodeDotS(t *testing.T) {
+func TestDecodeDotSDotU(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   []byte
@@ -1154,16 +1165,5 @@ func TestDecodeDotHash(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestDecodeError(t *testing.T) {
-	err := &DecodeError{
-		Line: "INVALID",
-		Msg:  "Invalid format",
-	}
-	expected := "Unable to decode command. Line [INVALID], Error [Invalid format]"
-	if err.Error() != expected {
-		t.Errorf("DecodeError.Error() = %q, want %q", err.Error(), expected)
 	}
 }
