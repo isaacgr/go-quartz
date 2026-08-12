@@ -169,19 +169,12 @@ func (p *QuartzProtocol) IssueCommand(cmd string) (<-chan any, error) {
 }
 
 func (p *QuartzProtocol) commandQueue() {
-	for {
-		select {
-		case cmd, ok := <-p.commands:
-			if !ok {
-				// TODO
-				return
-			}
-			if p.current == nil {
-				p.current = &cmd
-			} else {
-				p.outstanding = append(p.outstanding, cmd)
-				p.sendLine([]byte(cmd.command + p.delimiter))
-			}
+	for cmd := range p.commands {
+		if p.current == nil {
+			p.current = &cmd
+			p.sendLine([]byte(cmd.command + p.delimiter))
+		} else {
+			p.outstanding = append(p.outstanding, cmd)
 		}
 	}
 }
@@ -307,13 +300,13 @@ func (p *QuartzProtocol) readLines() {
 
 // handleLine parses a full line and queues the command
 func (p *QuartzProtocol) handleLine(line []byte) {
-	if !(len(line) > 1) || line[0] != '.' {
-		p.handleUnknownCmd(line)
+	if len(line) == 0 {
+		p.handleNullCmd(line)
 		return
 	}
 
-	if len(line) == 0 {
-		p.handleNullCmd(line)
+	if line[0] != '.' {
+		p.handleUnknownCmd(line)
 		return
 	}
 
