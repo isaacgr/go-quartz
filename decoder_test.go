@@ -273,6 +273,16 @@ func TestDecodeDotM(t *testing.T) {
 			false,
 		},
 		{
+			"valid multi route asymmetric",
+			[]byte("V1,1,A2,3,B3,4"),
+			[]*XptMsg{
+				{Levels: []string{"V"}, Dst: 1, Src: 1},
+				{Levels: []string{"A"}, Dst: 2, Src: 3},
+				{Levels: []string{"B"}, Dst: 3, Src: 4},
+			},
+			false,
+		},
+		{
 			"valid dest range",
 			[]byte("VA1-5,1"),
 			[]*XptMsg{

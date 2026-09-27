@@ -34,9 +34,14 @@ const (
 	DotHash Cmd = '#'
 )
 
+type response struct {
+	Result any
+	Err    error
+}
+
 type Command struct {
-	command  string   // the string to be encoded (i.e. ".SV1,1")
-	respChan chan any // the decoded response
+	command  string         // the string to be encoded (i.e. ".SV1,1")
+	respChan chan *response // the decoded response
 }
 type CommandHandler func(p *QuartzProtocol, cmd any)
 type ConnectionHandler func(p *QuartzProtocol, conn net.Conn)
@@ -109,6 +114,8 @@ func NewProtocol(
 		readErrors:  make(chan error, 1),
 		writeErrors: make(chan error, 1),
 
+		commands: make(chan Command, 1024),
+
 		commandHandlers: make(map[Cmd]CommandHandler),
 
 		closeSig: make(chan struct{}),
@@ -119,7 +126,6 @@ func (p *QuartzProtocol) Start() {
 	go p.dispatch()
 	go p.readLines()
 	go p.writeLines()
-	go p.commandQueue()
 }
 
 func (p *QuartzProtocol) Stop() {
@@ -154,29 +160,21 @@ func (p *QuartzProtocol) AddCommandHandler(cmd Cmd, handler CommandHandler) {
 	}
 }
 
-func (p *QuartzProtocol) IssueCommand(cmd string) (<-chan any, error) {
-	respChan := make(chan any, 1)
+// IssueCommand pushes the command onto the command queue and blocks until
+// a response is received
+func (p *QuartzProtocol) IssueCommand(cmd string) (any, error) {
+	respChan := make(chan *response, 1)
 	c := Command{
 		command:  cmd,
 		respChan: respChan,
 	}
-	select {
-	case p.commands <- c:
-		return respChan, nil
-	case <-p.closeSig:
-		return nil, errors.New("protocol closed")
+	// TODO: Timeout handling?
+	p.commands <- c
+	resp := <-c.respChan
+	if resp.Err != nil {
+		return nil, resp.Err
 	}
-}
-
-func (p *QuartzProtocol) commandQueue() {
-	for cmd := range p.commands {
-		if p.current == nil {
-			p.current = &cmd
-			p.sendLine([]byte(cmd.command + p.delimiter))
-		} else {
-			p.outstanding = append(p.outstanding, cmd)
-		}
-	}
+	return resp.Result, nil
 }
 
 func (p *QuartzProtocol) dispatch() {
@@ -200,6 +198,17 @@ func (p *QuartzProtocol) dispatch() {
 				return
 			}
 			p.handleShutdown(err.Error())
+		case cmd, ok := <-p.commands:
+			if !ok {
+				// TODO: close some channel that will close the protocol
+				return
+			}
+			if p.current == nil {
+				p.current = &cmd
+				p.sendLine([]byte(cmd.command + p.delimiter))
+			} else {
+				p.outstanding = append(p.outstanding, cmd)
+			}
 		case <-p.closeSig:
 			return
 		}
@@ -237,17 +246,16 @@ func (p *QuartzProtocol) readLines() {
 
 	readPos := 0 // how much valid data has been read
 
-	// TODO: Should we do something else with an EOF? Maybe read errors just shutdown the pcol
 	for {
 		readBytes, err := p.transport.Read(buf)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				p.log.Error("Error reading data", "Error", err)
-				p.readErrors <- err
 			} else {
 				p.log.Warn("Connection closed by peer")
 			}
-			continue
+			p.readErrors <- err
+			return
 		}
 
 		// we have data
@@ -368,7 +376,13 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleError(err)
 			return
 		}
-		handler(p, cmd)
+		if cmd.Type == "A" {
+			if p.current != nil && p.current.command[:2] == ".B" {
+				p.advanceQueue(&response{Result: cmd})
+			}
+		} else {
+			handler(p, cmd)
+		}
 	case 'F':
 		handler, ok := p.commandHandlers[DotF]
 		if !ok {
@@ -435,7 +449,13 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleError(err)
 			return
 		}
-		handler(p, cmd)
+		if cmd.Type == "A" {
+			if p.current != nil && p.current.command[:2] == ".R" {
+				p.advanceQueue(&response{Result: cmd})
+			}
+		} else {
+			handler(p, cmd)
+		}
 	case 'W':
 		handler, ok := p.commandHandlers[DotW]
 		if !ok {
@@ -452,12 +472,6 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			return
 		}
 		handler(p, cmd)
-	case '?':
-		// Embedded control system only
-		p.handleUnknownCmd(line)
-	case '!':
-		// Embedded control system only
-		p.handleUnknownCmd(line)
 	case 'Q':
 		handler, ok := p.commandHandlers[DotQ]
 		if !ok {
@@ -473,6 +487,7 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 			p.handleError(err)
 			return
 		}
+		// TODO: This has a response that isnt .A
 		handler(p, cmd)
 	case 'A':
 		// General response
@@ -501,18 +516,15 @@ func (p *QuartzProtocol) handleLine(line []byte) {
 	case '&':
 		// TODO
 		p.handleUnknownCmd(line)
+	case '?':
+		// Embedded control system only
+		p.handleUnknownCmd(line)
+	case '!':
+		// Embedded control system only
+		p.handleUnknownCmd(line)
 	default:
 		p.handleUnknownCmd(line)
 	}
-}
-
-// cmdType is a helper method to get the 'type' of the dot command, for
-// example the type of .BL would be 'L'
-func (p *QuartzProtocol) cmdType(line []byte) byte {
-	if len(line) > 2 {
-		return line[2]
-	}
-	return 0
 }
 
 func (p *QuartzProtocol) handleError(err error) {
@@ -542,22 +554,52 @@ func (p *QuartzProtocol) sendLine(line []byte) error {
 	}
 }
 
-func (p *QuartzProtocol) handleUpdate(line []byte) {
-	handler, ok := p.commandHandlers[DotU]
-	if !ok {
-		p.log.Error(
-			"No matching handler found for command",
-			"Cmd",
-			string(DotU),
-		)
-		return
+func (p *QuartzProtocol) advanceQueue(response *response) {
+	// Command received, which must be the response for the current
+	// command in the queue. So pop that off, and set p.current to the first
+	// element in p.outstanding
+	p.current.respChan <- response
+	p.current = nil
+	if len(p.outstanding) > 0 {
+		p.current = &p.outstanding[0]
+		p.outstanding = append(p.outstanding[:0], p.outstanding[1:]...)
 	}
+}
+
+func (p *QuartzProtocol) handleUpdate(line []byte) {
 	cmd, err := DecodeDotSDotU(line[2:])
 	if err != nil {
 		p.handleError(err)
 		return
 	}
-	handler(p, cmd)
+	if p.current != nil {
+		if p.current.command == ".S" || p.current.command == ".M" {
+			p.advanceQueue(&response{Result: cmd})
+		} else {
+			p.log.Debug("Unsolicited update received", "Cmd", cmd)
+			handler, ok := p.commandHandlers[DotU]
+			if !ok {
+				p.log.Error(
+					"No matching handler found for command",
+					"Cmd",
+					string(DotU),
+				)
+				return
+			}
+			handler(p, cmd)
+		}
+	} else {
+		handler, ok := p.commandHandlers[DotU]
+		if !ok {
+			p.log.Error(
+				"No matching handler found for command",
+				"Cmd",
+				string(DotU),
+			)
+			return
+		}
+		handler(p, cmd)
+	}
 }
 
 func (p *QuartzProtocol) handleResponse(line []byte) {
@@ -570,10 +612,18 @@ func (p *QuartzProtocol) handleResponse(line []byte) {
 		)
 		return
 	}
-	cmd, err := DecodeDotA(line[2:])
-	if err != nil {
-		p.handleError(err)
-		return
+	// dont attempt to decode if its just a .A response
+	var cmd []DotAResp
+	var err error
+	if len(line[2:]) > 0 {
+		cmd, err = DecodeDotA(line[2:])
+		if err != nil {
+			p.handleError(err)
+			return
+		}
+	}
+	if p.current != nil {
+		p.advanceQueue(&response{Result: cmd})
 	}
 	handler(p, cmd)
 }
@@ -597,8 +647,11 @@ func (p *QuartzProtocol) handleErrorResponse(line []byte) {
 		)
 		return
 	}
-	// TODO: This blocks the go routine
-	handler(p, cmd)
+	if p.current != nil {
+		p.advanceQueue(&response{Result: cmd})
+	} else {
+		handler(p, cmd)
+	}
 }
 
 func (p *QuartzProtocol) handleNullCmd(line []byte) {
@@ -637,7 +690,7 @@ func (p *QuartzProtocol) handleShutdown(reason string) {
 				err := ErrResp{
 					Msg: reason,
 				}
-				cmd.respChan <- []byte(err.Error())
+				cmd.respChan <- &response{Err: &err}
 				close(cmd.respChan)
 			}
 			// TODO: this should trigger a handler for the transport conn closing

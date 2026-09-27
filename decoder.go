@@ -246,8 +246,8 @@ func DecodeDotM(line []byte) ([]*XptMsg, error) {
 					}
 					resp = append(resp, &XptMsg{
 						Levels: []string{m[1]},
-						Src:    dst,
-						Dst:    src,
+						Src:    src,
+						Dst:    dst,
 					})
 				}
 				return resp, nil
@@ -315,19 +315,19 @@ func DecodeDotM(line []byte) ([]*XptMsg, error) {
 					return resp, nil
 
 				} else if len(srcRange) > 1 && len(dstRange) == 1 {
-					for _, d := range dstRange {
-						dst, err := strconv.Atoi(d)
-						if err != nil {
-							return nil, &DecodeError{
-								Line: string(line),
-								Msg:  "Cannot infer dst index",
-							}
-						}
-						src, err := strconv.Atoi(srcRange[0])
+					for _, s := range srcRange {
+						src, err := strconv.Atoi(s)
 						if err != nil {
 							return nil, &DecodeError{
 								Line: string(line),
 								Msg:  "Cannot infer src index",
+							}
+						}
+						dst, err := strconv.Atoi(dstRange[0])
+						if err != nil {
+							return nil, &DecodeError{
+								Line: string(line),
+								Msg:  "Cannot infer dst index",
 							}
 						}
 						resp = append(resp, &XptMsg{
