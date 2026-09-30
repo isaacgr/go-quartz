@@ -115,5 +115,65 @@ func TestNullCmdLogsWarning(t *testing.T) {
 	}
 }
 
-func TestConnectionMadeHandler(t *testing.T) {}
-func TestConnectionLostHandler(t *testing.T) {}
+func TestConnectionMadeHandler(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	server, _ := net.Pipe()
+	p := NewProtocol(server, logger, nil)
+
+	done := make(chan struct{})
+	connectionMadeCalled := false
+	p.AddConnectionMadeHandler(func(p *QuartzProtocol, err error) {
+		if err != nil {
+			t.Errorf("connection made got error. err = %v", err)
+		}
+		connectionMadeCalled = true
+		close(done)
+	})
+
+	p.Start()
+	defer p.Stop()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Errorf("connection made handler timeout")
+	}
+
+	if !connectionMadeCalled {
+		t.Errorf("connection made handler not called")
+	}
+}
+
+func TestConnectionLostHandler(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	server, _ := net.Pipe()
+	p := NewProtocol(server, logger, nil)
+
+	done := make(chan struct{})
+	connectionLostCalled := false
+	p.AddConnectionLostHandler(func(p *QuartzProtocol, err error) {
+		if err == nil {
+			t.Errorf("connection lost got no error")
+		}
+		connectionLostCalled = true
+		close(done)
+	})
+
+	p.Start()
+	defer p.Stop()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Errorf("connection lost handler timeout")
+	}
+
+	if !connectionLostCalled {
+		t.Errorf("connection lost handler not called")
+	}
+
+}
